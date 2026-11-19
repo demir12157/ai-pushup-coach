@@ -3,9 +3,6 @@ name: Build Pure Rust (Android APK & Windows EXE)
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'rust-app/**'
-      - '.github/workflows/build-rust.yml'
   workflow_dispatch:
 
 jobs:
@@ -32,14 +29,13 @@ jobs:
         run: cargo install cargo-apk --locked
 
       - name: Build Pure Rust Android APK
-        working-directory: rust-app
         run: cargo apk build --release --target aarch64-linux-android
 
       - name: Upload Pure Rust APK
         uses: actions/upload-artifact@v4
         with:
-          name: SinavKoc-PureRust-Android-APK
-          path: rust-app/target/release/apk/*.apk
+          name: AI-Pushup-Coach-Android-APK
+          path: target/release/apk/*.apk
 
   build-rust-windows:
     runs-on: windows-latest
@@ -51,15 +47,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run Rust unit tests
-        working-directory: rust-app
         run: cargo test
 
       - name: Build Windows native EXE
-        working-directory: rust-app
         run: cargo build --release
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
-          name: SinavKoc-PureRust-Windows-EXE
-          path: rust-app/target/release/sinav-koc.exe
+          name: AI-Pushup-Coach-Windows-EXE
+          path: target/release/sinav-koc.exe

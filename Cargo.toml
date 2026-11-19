@@ -1,6 +1,6 @@
 [package]
 name = "sinav-koc-rs"
-version = "2.0.0"
+version = "1.0.0"
 edition = "2021"
 description = "Pure Rust AI Pushup Counter & Real-Time Form Coach (Zero JS / Zero WebView)"
 
