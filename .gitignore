@@ -20,6 +20,9 @@ android/build
 android/local.properties
 android/app/src/main/assets/public
 
+# Rust build outputs
+rust-app/target
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

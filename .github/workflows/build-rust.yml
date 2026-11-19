@@ -1,0 +1,65 @@
+name: Build Pure Rust (Android APK & Windows EXE)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'rust-app/**'
+      - '.github/workflows/build-rust.yml'
+  workflow_dispatch:
+
+jobs:
+  build-rust-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust + Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK & build-tools
+        run: |
+          sdkmanager "ndk;26.3.11579264" "build-tools;34.0.0" "platforms;android-34"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.3.11579264" >> $GITHUB_ENV
+
+      - name: Install cargo-apk
+        run: cargo install cargo-apk --locked
+
+      - name: Build Pure Rust Android APK
+        working-directory: rust-app
+        run: cargo apk build --release --target aarch64-linux-android
+
+      - name: Upload Pure Rust APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinavKoc-PureRust-Android-APK
+          path: rust-app/target/release/apk/*.apk
+
+  build-rust-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust unit tests
+        working-directory: rust-app
+        run: cargo test
+
+      - name: Build Windows native EXE
+        working-directory: rust-app
+        run: cargo build --release
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinavKoc-PureRust-Windows-EXE
+          path: rust-app/target/release/sinav-koc.exe

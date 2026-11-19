@@ -40,8 +40,19 @@ cd android
 ```
 The compiled APK will be at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
+## Pure Rust Edition (`rust-app/`) — Zero JS / Zero WebView
+
+Prefer zero JavaScript, zero Node.js, and zero WebView? Check out the **Pure Rust** native app in [`rust-app/`](rust-app/) built with `eframe`/`egui` + `nokhwa` + `cargo-apk`:
+
+```bash
+cd rust-app
+cargo test
+cargo run --release
+```
+
+GitHub Actions automatically builds both **Pure Rust Android APK** (`aarch64-linux-android`) and **Pure Rust Windows `.exe`** under the **Actions** tab.
+
 ## Tech Stack
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, Lucide Icons
-- **Computer Vision:** `@mediapipe/tasks-vision` (Pose Landmarker)
-- **Mobile Packaging:** Capacitor Android
+- **Pure Rust Edition (`rust-app/`):** Rust, `eframe`/`egui`, `nokhwa`, `serde`, `chrono`, `cargo-apk`
+- **Web / Capacitor Edition:** React 19, TypeScript, Vite, Tailwind CSS v4, `@mediapipe/tasks-vision`, Capacitor Android

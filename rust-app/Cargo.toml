@@ -1,0 +1,49 @@
+[package]
+name = "sinav-koc-rs"
+version = "2.0.0"
+edition = "2021"
+description = "Pure Rust AI Pushup Counter & Real-Time Form Coach (Zero JS / Zero WebView)"
+
+[lib]
+name = "sinav_koc_rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "sinav-koc"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.31"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+nokhwa = { version = "0.10", default-features = false, features = ["input-native"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "android-native-activity"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[package.metadata.android]
+package = "com.sinavkoc.rust"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 24
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "SinavKoc (Rust)"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.CAMERA"
+
