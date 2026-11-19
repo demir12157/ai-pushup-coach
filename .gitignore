@@ -2,6 +2,7 @@
 **/*.rs.bk
 *.pdb
 *.apk
+*.keystore
 .DS_Store
 Thumbs.db
 sinavkoc_sessions.json

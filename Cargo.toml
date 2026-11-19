@@ -47,3 +47,7 @@ label = "SinavKoc (Rust)"
 [[package.metadata.android.uses_permission]]
 name = "android.permission.CAMERA"
 
+[package.metadata.android.signing.release]
+path = "release.keystore"
+keystore_password = "sinavkoc123"
+
