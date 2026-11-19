@@ -35,6 +35,8 @@ strip = true
 
 [package.metadata.android]
 package = "com.sinavkoc.rust"
+version_code = 1
+version_name = "1.0.0"
 build_targets = ["aarch64-linux-android"]
 
 [package.metadata.android.sdk]
@@ -42,7 +44,11 @@ min_sdk_version = 24
 target_sdk_version = 34
 
 [package.metadata.android.application]
-label = "SinavKoc (Rust)"
+label = "SinavKoc"
+extract_native_libs = true
+
+[package.metadata.android.application.activity]
+exported = true
 
 [[package.metadata.android.uses_permission]]
 name = "android.permission.CAMERA"

@@ -30,16 +30,29 @@ jobs:
       - name: Install cargo-apk
         run: cargo install cargo-apk --locked
 
-      - name: Build Pure Rust Android APK
+      - name: Build & Sign Pure Rust Android APK
         run: |
           keytool -genkey -v -keystore release.keystore -alias sinavkoc -keyalg RSA -keysize 2048 -validity 10000 -storepass sinavkoc123 -keypass sinavkoc123 -dname "CN=SinavKoc,O=SinavKoc,C=TR"
           cargo apk build --release --lib
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
+          RAW_APK=$(ls target/release/apk/*.apk | head -n 1)
+          "$BUILD_TOOLS/aapt2" dump badging "$RAW_APK"
+          "$BUILD_TOOLS/zipalign" -p -f -v 4 "$RAW_APK" target/release/apk/aligned.apk
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks release.keystore \
+            --ks-pass pass:sinavkoc123 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out target/release/apk/AI-Pushup-Coach-Rust.apk \
+            target/release/apk/aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose target/release/apk/AI-Pushup-Coach-Rust.apk
 
       - name: Upload Pure Rust APK
         uses: actions/upload-artifact@v4
         with:
           name: AI-Pushup-Coach-Android-APK
-          path: target/release/apk/*.apk
+          path: target/release/apk/AI-Pushup-Coach-Rust.apk
 
   build-rust-windows:
     runs-on: windows-latest
