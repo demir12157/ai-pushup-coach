@@ -139,9 +139,10 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         lastUseRight = useRight
 
         val chosenIdx = if (useRight) rightIdx else leftIdx
+        val avgKeyVis = chosenIdx.map { landmarks[it].visibility }.average().toFloat()
         val minKeyVis = chosenIdx.minOf { landmarks[it].visibility }
 
-        if (minKeyVis < 0.35f) {
+        if (avgKeyVis < 0.40f || minKeyVis < 0.22f) {
             downHoldFrames = 0
             upHoldFrames = 0
             return AnalysisOutput(
@@ -179,20 +180,25 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         smoothedElbow = elbowAngle
         smoothedBody = bodyAngle
 
-        // 2. Continuous pushup posture verification in true pixel geometry
+        // 2. Pushup posture verification in true pixel geometry
+        // Allows steep torso angle for Knee/Incline & diagonal camera views,
+        // and allows shoulders to drop all the way to wrist/floor level at bottom of a deep pushup!
         val dxPx = abs(shoulder.x - hip.x) * imgW
         val dyPx = abs(shoulder.y - hip.y) * imgH
-        val maxVertRatio = if (variation.id == PushupVariationId.INCLINE) 2.0f else 1.35f
-        val handsBelowShoulders = (wrist.y - shoulder.y) > 0.02f
-        val isPushupPosture = (dxPx > imgW * 0.06f) &&
+        val maxVertRatio = when (variation.id) {
+            PushupVariationId.KNEE, PushupVariationId.INCLINE -> 2.6f
+            else -> 1.85f
+        }
+        val handsNotAboveHead = (wrist.y - shoulder.y) > -0.08f
+        val isPushupPosture = (dxPx > imgW * 0.045f) &&
             (dyPx / (dxPx + 0.001f) < maxVertRatio) &&
-            handsBelowShoulders
+            handsNotAboveHead
 
         if (!isPushupPosture) {
             idleResetFrames += 1
             downHoldFrames = 0
             upHoldFrames = 0
-            if (idleResetFrames >= 6) {
+            if (idleResetFrames >= 12) {
                 phase = "IDLE"
                 attemptedDescent = false
                 repMinElbow = 180f
@@ -206,7 +212,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     bodyAngle = bodyAngle.roundToInt(),
                     depthPercent = 0f,
                     severity = FormSeverity.WARNING,
-                    feedbackText = "Şınav (plank) pozisyonuna geç — eller yerde, vücut yatay",
+                    feedbackText = "Şınav pozisyonuna geç — yan profilden tüm gövden görünsün",
                     currentScore = getAverageScore(),
                     landmarks = landmarks,
                     activeSideRight = useRight,

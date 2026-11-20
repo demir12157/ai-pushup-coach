@@ -357,12 +357,30 @@ fun CameraWorkoutScreen(
             }
         }
 
-        // Right-side Depth Gauge + Angle Readout
+        // Right-side Depth Gauge + Angle Readout + Phase Indicator
         Column(
             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            val phaseLabel = when (liveState.phase) {
+                "UP" -> "HAZIR"
+                "DOWN" -> "DİPTE"
+                else -> "BEKLİYOR"
+            }
+            val phaseBg = when (liveState.phase) {
+                "UP" -> Emerald.copy(alpha = 0.25f)
+                "DOWN" -> Sky.copy(alpha = 0.30f)
+                else -> Amber.copy(alpha = 0.25f)
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(phaseBg)
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            ) {
+                Text(phaseLabel, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+            }
             Text("DERİNLİK", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             Box(
                 modifier = Modifier

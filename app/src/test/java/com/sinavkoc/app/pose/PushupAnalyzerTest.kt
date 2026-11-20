@@ -53,6 +53,38 @@ class PushupAnalyzerTest {
     }
 
     @Test
+    fun countsDeepKneePushupWhenShouldersReachWristLevel() {
+        val analyzer = PushupAnalyzer(PushupCatalog.get(PushupVariationId.KNEE))
+        fun kneePose(bend: Float): List<PosePoint> {
+            val list = MutableList(33) { PosePoint(0.5f, 0.5f, 0.1f) }
+            // Realistic steeper knee-pushup torso where shoulder drops to wrist height at bottom
+            list[7] = PosePoint(0.28f, 0.44f + bend * 0.24f, 0.95f)
+            list[11] = PosePoint(0.35f, 0.48f + bend * 0.24f, 0.95f) // bottom y = 0.72 == wrist y!
+            list[13] = PosePoint(0.33f - bend * 0.14f, 0.60f + bend * 0.08f, 0.95f)
+            list[15] = PosePoint(0.35f, 0.72f, 0.95f)
+            list[23] = PosePoint(0.50f, 0.61f + bend * 0.09f, 0.95f)
+            list[25] = PosePoint(0.65f, 0.73f, 0.95f)
+            list[27] = PosePoint(0.75f, 0.69f, 0.30f)
+            return list
+        }
+
+        var t = 1000L
+        repeat(6) {
+            analyzer.analyze(kneePose(0f), 480, 640, false, t)
+            t += 60L
+        }
+        repeat(8) {
+            analyzer.analyze(kneePose(1f), 480, 640, false, t)
+            t += 80L
+        }
+        repeat(8) {
+            analyzer.analyze(kneePose(0f), 480, 640, false, t)
+            t += 80L
+        }
+        assertEquals(1, analyzer.getReps())
+    }
+
+    @Test
     fun detectsHipSagFormError() {
         val analyzer = PushupAnalyzer(PushupCatalog.get(PushupVariationId.STANDARD))
         var sawError = false

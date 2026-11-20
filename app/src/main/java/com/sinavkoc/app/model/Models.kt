@@ -124,7 +124,7 @@ object PushupCatalog {
             description = "Eller omuz genişliğinin hemen dışında, vücut baştan topuğa düz çizgide yapılan temel şınav.",
             cameraTip = "Telefonu yan profiline, yerden 20-40 cm yükseğe ve tüm vücudun görünecek şekilde yasla.",
             caloriesPerRep = 0.45f,
-            thresholds = VariationThresholds(95f, 155f, 155f),
+            thresholds = VariationThresholds(108f, 145f, 152f),
             checklist = listOf(
                 "Eller omuzların hemen altında ve hafifçe dışında olsun.",
                 "Dirsekleri gövdeden 45° açıyla geriye doğru bük.",
@@ -146,7 +146,7 @@ object PushupCatalog {
             description = "Eller omuz genişliğinden açık konumlandırılır; göğüs kaslarını daha fazla izole eder.",
             cameraTip = "Yan veya 45° çapraz açıdan tüm gövden ve kolun net görünecek şekilde yerleştir.",
             caloriesPerRep = 0.48f,
-            thresholds = VariationThresholds(100f, 152f, 154f),
+            thresholds = VariationThresholds(112f, 144f, 150f),
             checklist = listOf(
                 "Ellerini omuz genişliğinin yaklaşık 1.5 katı kadar aç.",
                 "Parmak uçlarını hafifçe dışa çevirerek omuzu rahatlat.",
@@ -166,7 +166,7 @@ object PushupCatalog {
             description = "Başparmak ve işaret parmakları göğüs altında elmas oluşturur. Triceps için en etkili varyasyon.",
             cameraTip = "Yan profilden kameraya 1.5-2 metre uzaklıkta dur, dirsek bükülmesi net görünsün.",
             caloriesPerRep = 0.58f,
-            thresholds = VariationThresholds(95f, 155f, 155f),
+            thresholds = VariationThresholds(108f, 145f, 152f),
             checklist = listOf(
                 "Ellerini tam göğüs kafesinin altında birleştir.",
                 "Dirseklerini gövdene yakın tutarak geriye doğru bük.",
@@ -186,7 +186,7 @@ object PushupCatalog {
             description = "Dizler yerde destek alarak yükü azaltır. Doğru şınav formunu oturtmak için harika başlangıç.",
             cameraTip = "Yan profilden omuz, kalça ve dizlerinin tamamı kadraja girsin.",
             caloriesPerRep = 0.30f,
-            thresholds = VariationThresholds(95f, 152f, 152f, useKneeLine = true),
+            thresholds = VariationThresholds(110f, 142f, 146f, useKneeLine = true),
             checklist = listOf(
                 "Omuzdan dize kadar düz bir çizgi oluştur.",
                 "Kalçanı geride bırakma, göğsünü ellerinin arasına indir.",
@@ -206,7 +206,7 @@ object PushupCatalog {
             description = "Eller yüksek bir yüzeyde (koltuk, sehpa) konumlanır. Alt göğsü hedefler ve yükü hafifletir.",
             cameraTip = "Yükseltiyle birlikte tüm vücudun yan profilden görünecek şekilde kamerayı yerleştir.",
             caloriesPerRep = 0.32f,
-            thresholds = VariationThresholds(95f, 152f, 154f),
+            thresholds = VariationThresholds(110f, 142f, 150f),
             checklist = listOf(
                 "Ellerini kaymayan sağlam bir yükseltiye koy.",
                 "Vücudunu baştan topuğa düz bir eğim halinde tut.",
@@ -226,7 +226,7 @@ object PushupCatalog {
             description = "Ayaklar yüksek bir yüzeyde, eller yerde. Üst göğüs ve omuz kaslarını yoğun çalıştırır.",
             cameraTip = "Yan profilden ayaklar yükseltide, eller yerde olacak şekilde konumlan.",
             caloriesPerRep = 0.62f,
-            thresholds = VariationThresholds(95f, 155f, 154f),
+            thresholds = VariationThresholds(108f, 145f, 150f),
             checklist = listOf(
                 "Ayaklarını sağlam bir sandalye veya kutu üzerine yerleştir.",
                 "Core kaslarını ekstra sık — yerçekimi belini aşağı çekmeye çalışır.",
