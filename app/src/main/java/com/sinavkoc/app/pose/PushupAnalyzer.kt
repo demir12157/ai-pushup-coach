@@ -24,6 +24,8 @@ class PushupAnalyzer(private var variation: PushupVariation) {
     private var downHoldFrames = 0
     private var upHoldFrames = 0
     private var idleResetFrames = 0
+    private var lowVisFrames = 0
+    private var headDropFrames = 0
 
     // Per-rep trackers
     private var repStartMs = 0L
@@ -48,6 +50,8 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         downHoldFrames = 0
         upHoldFrames = 0
         idleResetFrames = 0
+        lowVisFrames = 0
+        headDropFrames = 0
         repStartMs = 0L
         repMinElbow = 180f
         topShoulderY = 0f
@@ -142,22 +146,27 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val avgKeyVis = chosenIdx.map { landmarks[it].visibility }.average().toFloat()
         val minKeyVis = chosenIdx.minOf { landmarks[it].visibility }
 
-        if (avgKeyVis < 0.40f || minKeyVis < 0.22f) {
-            downHoldFrames = 0
-            upHoldFrames = 0
-            return AnalysisOutput(
-                LivePoseState(
-                    phase = phase,
-                    reps = reps,
-                    severity = FormSeverity.WARNING,
-                    feedbackText = "Tüm vücudun net görünmüyor, kameradan biraz uzaklaş",
-                    currentScore = getAverageScore(),
-                    landmarks = landmarks,
-                    activeSideRight = useRight,
-                    imageWidth = imgW,
-                    imageHeight = imgH
+        if (avgKeyVis < 0.32f || minKeyVis < 0.15f) {
+            lowVisFrames += 1
+            if (lowVisFrames >= 5) {
+                downHoldFrames = 0
+                upHoldFrames = 0
+                return AnalysisOutput(
+                    LivePoseState(
+                        phase = phase,
+                        reps = reps,
+                        severity = FormSeverity.WARNING,
+                        feedbackText = "Tüm vücudun net görünmüyor, kameradan biraz uzaklaş",
+                        currentScore = getAverageScore(),
+                        landmarks = landmarks,
+                        activeSideRight = useRight,
+                        imageWidth = imgW,
+                        imageHeight = imgH
+                    )
                 )
-            )
+            }
+        } else {
+            lowVisFrames = 0
         }
 
         val shoulder = landmarks[if (useRight) 12 else 11]
@@ -241,13 +250,20 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             }
         }
 
-        // Head drop (aspect-corrected torso length)
-        if (ear.visibility > 0.45f) {
+        // Head drop (only flag if head drops clearly below shoulder for 6+ consecutive frames)
+        if (ear.visibility > 0.55f) {
             val torsoLenPx = hypot(((shoulder.x - hip.x) * imgW).toDouble(), ((shoulder.y - hip.y) * imgH).toDouble()).toFloat()
             val earDropPx = (ear.y - shoulder.y) * imgH
-            if (torsoLenPx > imgW * 0.08f && earDropPx > torsoLenPx * 0.28f) {
-                activeIssues.add(FormIssue.HEAD_DROP)
+            if (torsoLenPx > imgW * 0.10f && earDropPx > torsoLenPx * 0.44f) {
+                headDropFrames += 1
+                if (headDropFrames >= 6) {
+                    activeIssues.add(FormIssue.HEAD_DROP)
+                }
+            } else {
+                headDropFrames = 0
             }
+        } else {
+            headDropFrames = 0
         }
 
         val depthPercent = (((t.upAngle - elbowAngle) / (t.upAngle - t.downAngle)) * 100f).coerceIn(0f, 100f)
