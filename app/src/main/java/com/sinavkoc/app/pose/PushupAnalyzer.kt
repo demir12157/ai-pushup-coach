@@ -18,8 +18,18 @@ class PushupAnalyzer(private var variation: PushupVariation) {
     private var smoothedElbow: Float? = null
     private var smoothedBody: Float? = null
 
+    // Anti-shake & stability trackers
+    private var prevWrist: PosePoint? = null
+    private var unstableUntilMs = 0L
+    private var downHoldFrames = 0
+    private var upHoldFrames = 0
+    private var idleResetFrames = 0
+
+    // Per-rep trackers
     private var repStartMs = 0L
     private var repMinElbow = 180f
+    private var topShoulderY = 0f
+    private var maxShoulderY = 0f
     private val repIssues = mutableSetOf<FormIssue>()
     private var attemptedDescent = false
     private var lastShallowAlertMs = 0L
@@ -32,8 +42,15 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         issueCounts.clear()
         smoothedElbow = null
         smoothedBody = null
+        prevWrist = null
+        unstableUntilMs = 0L
+        downHoldFrames = 0
+        upHoldFrames = 0
+        idleResetFrames = 0
         repStartMs = 0L
         repMinElbow = 180f
+        topShoulderY = 0f
+        maxShoulderY = 0f
         repIssues.clear()
         attemptedDescent = false
         lastShallowAlertMs = 0L
@@ -46,6 +63,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
 
     fun analyze(landmarks: List<PosePoint>, nowMs: Long = System.currentTimeMillis()): AnalysisOutput {
         if (landmarks.size < 29) {
+            downHoldFrames = 0
+            upHoldFrames = 0
+            prevWrist = null
             return AnalysisOutput(
                 LivePoseState(
                     phase = phase,
@@ -54,25 +74,31 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     bodyAngle = smoothedBody?.roundToInt(),
                     depthPercent = 0f,
                     severity = FormSeverity.WARNING,
-                    feedbackText = "Kameraya yan profilden tüm vücudun görünecek şekilde geç",
+                    feedbackText = "Telefonu sabit bir yere yasla ve yan profilden kadraja gir",
                     currentScore = getAverageScore(),
                     landmarks = landmarks
                 )
             )
         }
 
-        val leftVis = listOf(11, 13, 15, 23).map { landmarks[it].visibility }.average().toFloat()
-        val rightVis = listOf(12, 14, 16, 24).map { landmarks[it].visibility }.average().toFloat()
+        val leftIdx = listOf(11, 13, 15, 23)
+        val rightIdx = listOf(12, 14, 16, 24)
+        val leftVis = leftIdx.map { landmarks[it].visibility }.average().toFloat()
+        val rightVis = rightIdx.map { landmarks[it].visibility }.average().toFloat()
         val useRight = rightVis > leftVis
-        val bestVis = max(leftVis, rightVis)
+        val chosenIdx = if (useRight) rightIdx else leftIdx
+        val minKeyVis = chosenIdx.minOf { landmarks[it].visibility }
 
-        if (bestVis < 0.35f) {
+        // Require all 4 key joints (shoulder, elbow, wrist, hip) clearly visible
+        if (minKeyVis < 0.50f) {
+            downHoldFrames = 0
+            upHoldFrames = 0
             return AnalysisOutput(
                 LivePoseState(
                     phase = phase,
                     reps = reps,
                     severity = FormSeverity.WARNING,
-                    feedbackText = "Vücudun net görünmüyor, kameradan biraz uzaklaş",
+                    feedbackText = "Tüm vücudun net görünmüyor, kameradan biraz uzaklaş",
                     currentScore = getAverageScore(),
                     landmarks = landmarks,
                     activeSideRight = useRight
@@ -88,37 +114,80 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val ankle = landmarks[if (useRight) 28 else 27]
         val ear = landmarks[if (useRight) 8 else 7]
 
-        val lower = if (variation.thresholds.useKneeLine || ankle.visibility < 0.35f) knee else ankle
+        // 1. Camera shake / moving hand detection:
+        // During a real pushup, wrists stay planted on the floor.
+        prevWrist?.let { prev ->
+            val wristJump = hypot((wrist.x - prev.x).toDouble(), (wrist.y - prev.y).toDouble()).toFloat()
+            if (wristJump > 0.065f) {
+                unstableUntilMs = nowMs + 900L
+                downHoldFrames = 0
+                upHoldFrames = 0
+            }
+        }
+        prevWrist = wrist
 
-        val rawElbow = calcAngle(shoulder, elbow, wrist)
-        val rawBody = calcAngle(shoulder, hip, lower)
-
-        val alpha = 0.35f
-        val elbowAngle = smoothedElbow?.let { it * (1f - alpha) + rawElbow * alpha } ?: rawElbow
-        val bodyAngle = smoothedBody?.let { it * (1f - alpha) + rawBody * alpha } ?: rawBody
-        smoothedElbow = elbowAngle
-        smoothedBody = bodyAngle
-
-        val dx = abs(shoulder.x - hip.x)
-        val dy = abs(shoulder.y - hip.y)
-        val maxVertRatio = if (variation.id == PushupVariationId.INCLINE) 2.4f else 1.6f
-        val isPushupPosture = dx > 0.04f && (dy / (dx + 0.001f)) < maxVertRatio
-
-        if (!isPushupPosture && phase == "IDLE") {
+        if (nowMs < unstableUntilMs) {
             return AnalysisOutput(
                 LivePoseState(
-                    phase = "IDLE",
+                    phase = phase,
                     reps = reps,
-                    elbowAngle = elbowAngle.roundToInt(),
-                    bodyAngle = bodyAngle.roundToInt(),
+                    elbowAngle = smoothedElbow?.roundToInt(),
+                    bodyAngle = smoothedBody?.roundToInt(),
                     depthPercent = 0f,
                     severity = FormSeverity.WARNING,
-                    feedbackText = "Şınav pozisyonuna geç (plank duruşu)",
+                    feedbackText = "Kamera hareket ediyor! Telefonu sabit bir yere yasla",
                     currentScore = getAverageScore(),
                     landmarks = landmarks,
                     activeSideRight = useRight
                 )
             )
+        }
+
+        val lower = if (variation.thresholds.useKneeLine || ankle.visibility < 0.40f) knee else ankle
+
+        val rawElbow = calcAngle(shoulder, elbow, wrist)
+        val rawBody = calcAngle(shoulder, hip, lower)
+
+        val alpha = 0.30f
+        val elbowAngle = smoothedElbow?.let { it * (1f - alpha) + rawElbow * alpha } ?: rawElbow
+        val bodyAngle = smoothedBody?.let { it * (1f - alpha) + rawBody * alpha } ?: rawBody
+        smoothedElbow = elbowAngle
+        smoothedBody = bodyAngle
+
+        // 2. Continuous pushup posture verification:
+        // Torso must be plank-like (not standing upright) AND hands below shoulders
+        val dx = abs(shoulder.x - hip.x)
+        val dy = abs(shoulder.y - hip.y)
+        val maxVertRatio = if (variation.id == PushupVariationId.INCLINE) 2.0f else 1.25f
+        val handsBelowShoulders = wrist.y > shoulder.y + 0.03f
+        val isPushupPosture = dx > 0.08f && (dy / (dx + 0.001f)) < maxVertRatio && handsBelowShoulders
+
+        if (!isPushupPosture) {
+            idleResetFrames += 1
+            downHoldFrames = 0
+            upHoldFrames = 0
+            if (idleResetFrames >= 5) {
+                phase = "IDLE"
+                attemptedDescent = false
+                repMinElbow = 180f
+                repIssues.clear()
+            }
+            return AnalysisOutput(
+                LivePoseState(
+                    phase = phase,
+                    reps = reps,
+                    elbowAngle = elbowAngle.roundToInt(),
+                    bodyAngle = bodyAngle.roundToInt(),
+                    depthPercent = 0f,
+                    severity = FormSeverity.WARNING,
+                    feedbackText = "Şınav (plank) pozisyonuna geç — eller yerde, vücut yatay",
+                    currentScore = getAverageScore(),
+                    landmarks = landmarks,
+                    activeSideRight = useRight
+                )
+            )
+        } else {
+            idleResetFrames = 0
         }
 
         val t = variation.thresholds
@@ -139,7 +208,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         }
 
         // Head drop
-        if (ear.visibility > 0.4f) {
+        if (ear.visibility > 0.45f) {
             val torsoLen = hypot((shoulder.x - hip.x).toDouble(), (shoulder.y - hip.y).toDouble()).toFloat()
             if (torsoLen > 0.08f && ear.y > shoulder.y + torsoLen * 0.28f) {
                 activeIssues.add(FormIssue.HEAD_DROP)
@@ -150,77 +219,115 @@ class PushupAnalyzer(private var variation: PushupVariation) {
 
         if (phase == "UP" || phase == "DOWN") {
             if (elbowAngle < repMinElbow) repMinElbow = elbowAngle
+            if (shoulder.y > maxShoulderY) maxShoulderY = shoulder.y
             repIssues.addAll(activeIssues)
         }
 
         var completedRep: RepRecord? = null
         var voiceCue: String? = null
 
+        // 3. Debounced state machine (requires 3 consecutive frames + actual vertical shoulder travel)
         when (phase) {
             "IDLE" -> {
-                if (elbowAngle >= t.upAngle - 12f && isPushupPosture) {
-                    phase = "UP"
-                    repStartMs = nowMs
-                    repMinElbow = elbowAngle
-                    repIssues.clear()
+                if (elbowAngle >= t.upAngle - 10f) {
+                    upHoldFrames += 1
+                    if (upHoldFrames >= 3) {
+                        phase = "UP"
+                        upHoldFrames = 0
+                        downHoldFrames = 0
+                        repStartMs = nowMs
+                        repMinElbow = elbowAngle
+                        topShoulderY = shoulder.y
+                        maxShoulderY = shoulder.y
+                        repIssues.clear()
+                    }
+                } else {
+                    upHoldFrames = 0
                 }
             }
             "UP" -> {
+                if (elbowAngle >= t.upAngle - 8f && !attemptedDescent) {
+                    // Continuously calibrate top shoulder height while waiting in plank
+                    topShoulderY = topShoulderY * 0.8f + shoulder.y * 0.2f
+                    maxShoulderY = topShoulderY
+                }
                 if (elbowAngle < t.upAngle - 22f && !attemptedDescent) {
                     attemptedDescent = true
                     repStartMs = nowMs
                 }
                 if (elbowAngle <= t.downAngle) {
-                    phase = "DOWN"
-                } else if (attemptedDescent &&
-                    repMinElbow < t.upAngle - 25f &&
-                    repMinElbow > t.downAngle + 8f &&
-                    elbowAngle >= t.upAngle - 4f
-                ) {
-                    attemptedDescent = false
-                    repMinElbow = 180f
-                    if (nowMs - lastShallowAlertMs > 3000L) {
-                        lastShallowAlertMs = nowMs
-                        issueCounts[FormIssue.SHALLOW_DEPTH] = (issueCounts[FormIssue.SHALLOW_DEPTH] ?: 0) + 1
-                        activeIssues.add(FormIssue.SHALLOW_DEPTH)
-                        voiceCue = FormIssue.SHALLOW_DEPTH.voiceCue
+                    downHoldFrames += 1
+                    if (downHoldFrames >= 3) {
+                        phase = "DOWN"
+                        downHoldFrames = 0
+                        upHoldFrames = 0
+                    }
+                } else {
+                    downHoldFrames = 0
+                    if (attemptedDescent &&
+                        repMinElbow < t.upAngle - 25f &&
+                        repMinElbow > t.downAngle + 8f &&
+                        elbowAngle >= t.upAngle - 4f
+                    ) {
+                        attemptedDescent = false
+                        repMinElbow = 180f
+                        if (nowMs - lastShallowAlertMs > 3000L) {
+                            lastShallowAlertMs = nowMs
+                            issueCounts[FormIssue.SHALLOW_DEPTH] = (issueCounts[FormIssue.SHALLOW_DEPTH] ?: 0) + 1
+                            activeIssues.add(FormIssue.SHALLOW_DEPTH)
+                            voiceCue = FormIssue.SHALLOW_DEPTH.voiceCue
+                        }
                     }
                 }
             }
             "DOWN" -> {
                 if (elbowAngle >= t.upAngle) {
-                    reps += 1
-                    val durationMs = if (repStartMs > 0L) nowMs - repStartMs else 1500L
-                    if (durationMs < 750L) {
-                        repIssues.add(FormIssue.TOO_FAST)
+                    upHoldFrames += 1
+                    if (upHoldFrames >= 3) {
+                        val durationMs = if (repStartMs > 0L) nowMs - repStartMs else 1500L
+                        val verticalTravel = maxShoulderY - topShoulderY
+
+                        // Reject impossible ultra-fast glitches or zero vertical movement
+                        if (durationMs >= 550L && verticalTravel >= 0.035f) {
+                            reps += 1
+                            if (durationMs < 850L) {
+                                repIssues.add(FormIssue.TOO_FAST)
+                            }
+
+                            val issues = repIssues.toList()
+                            issues.forEach { issue ->
+                                issueCounts[issue] = (issueCounts[issue] ?: 0) + 1
+                            }
+
+                            var score = 100
+                            if (FormIssue.HIP_SAG in repIssues) score -= 20
+                            if (FormIssue.HIP_PIKE in repIssues) score -= 16
+                            if (FormIssue.HEAD_DROP in repIssues) score -= 10
+                            if (FormIssue.TOO_FAST in repIssues) score -= 12
+                            score = score.coerceIn(40, 100)
+
+                            completedRep = RepRecord(
+                                repNumber = reps,
+                                minElbowAngle = repMinElbow.roundToInt(),
+                                durationMs = durationMs,
+                                score = score,
+                                issues = issues
+                            )
+                            repRecords.add(completedRep)
+                        }
+
+                        phase = "UP"
+                        upHoldFrames = 0
+                        downHoldFrames = 0
+                        repStartMs = nowMs
+                        repMinElbow = 180f
+                        topShoulderY = shoulder.y
+                        maxShoulderY = shoulder.y
+                        repIssues.clear()
+                        attemptedDescent = false
                     }
-
-                    val issues = repIssues.toList()
-                    issues.forEach { issue ->
-                        issueCounts[issue] = (issueCounts[issue] ?: 0) + 1
-                    }
-
-                    var score = 100
-                    if (FormIssue.HIP_SAG in repIssues) score -= 20
-                    if (FormIssue.HIP_PIKE in repIssues) score -= 16
-                    if (FormIssue.HEAD_DROP in repIssues) score -= 10
-                    if (FormIssue.TOO_FAST in repIssues) score -= 12
-                    score = score.coerceIn(40, 100)
-
-                    completedRep = RepRecord(
-                        repNumber = reps,
-                        minElbowAngle = repMinElbow.roundToInt(),
-                        durationMs = durationMs,
-                        score = score,
-                        issues = issues
-                    )
-                    repRecords.add(completedRep)
-
-                    phase = "UP"
-                    repStartMs = nowMs
-                    repMinElbow = 180f
-                    repIssues.clear()
-                    attemptedDescent = false
+                } else {
+                    upHoldFrames = 0
                 }
             }
         }
