@@ -106,10 +106,11 @@ data class LivePoseState(
     val bodyAngle: Int? = null,
     val depthPercent: Float = 0f,
     val severity: FormSeverity = FormSeverity.WARNING,
-    val feedbackText: String = "Kameraya yan profilden tüm vücudun görünecek şekilde geç",
+    val feedbackText: String = "Telefonu önüne veya yanına sabitle ve şınav pozisyonuna geç",
     val currentScore: Int = 100,
     val landmarks: List<PosePoint> = emptyList(),
     val activeSideRight: Boolean = false,
+    val isFrontView: Boolean = false,
     val imageWidth: Int = 480,
     val imageHeight: Int = 640
 )

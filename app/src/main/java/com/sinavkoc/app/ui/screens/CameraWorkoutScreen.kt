@@ -260,11 +260,23 @@ fun CameraWorkoutScreen(
                     y = p.y * imgH * scale + offsetY
                 )
 
-                val activeEdges = if (liveState.activeSideRight) RIGHT_EDGES else LEFT_EDGES
-                val backEdges = if (liveState.activeSideRight) LEFT_EDGES else RIGHT_EDGES
+                val activeEdges = if (liveState.isFrontView) {
+                    LEFT_EDGES + RIGHT_EDGES + BRIDGE_EDGES
+                } else if (liveState.activeSideRight) {
+                    RIGHT_EDGES
+                } else {
+                    LEFT_EDGES
+                }
+                val backEdges = if (liveState.isFrontView) {
+                    emptyList()
+                } else if (liveState.activeSideRight) {
+                    LEFT_EDGES + BRIDGE_EDGES
+                } else {
+                    RIGHT_EDGES + BRIDGE_EDGES
+                }
 
-                // Draw back side & torso bridges subtly
-                for ((a, b) in backEdges + BRIDGE_EDGES) {
+                // Draw back side subtly (side view only)
+                for ((a, b) in backEdges) {
                     val pA = lms[a]
                     val pB = lms[b]
                     if (pA.visibility < 0.35f || pB.visibility < 0.35f) continue
@@ -301,7 +313,9 @@ fun CameraWorkoutScreen(
                 }
 
                 // Active joints
-                val keyJoints = if (liveState.activeSideRight) {
+                val keyJoints = if (liveState.isFrontView) {
+                    listOf(11, 13, 15, 12, 14, 16, 23, 24)
+                } else if (liveState.activeSideRight) {
                     listOf(8, 12, 14, 16, 24, 26, 28)
                 } else {
                     listOf(7, 11, 13, 15, 23, 25, 27)
@@ -425,6 +439,19 @@ fun CameraWorkoutScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    if (liveState.isFrontView) "ÖN AÇI" else "YAN AÇI",
+                    color = Sky,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
             val phaseLabel = when (liveState.phase) {
                 "UP" -> "HAZIR"
                 "DOWN" -> "DİPTE"

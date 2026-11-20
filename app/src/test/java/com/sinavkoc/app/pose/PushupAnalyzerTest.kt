@@ -85,6 +85,40 @@ class PushupAnalyzerTest {
     }
 
     @Test
+    fun countsFrontFacingPushup() {
+        val analyzer = PushupAnalyzer(PushupCatalog.get(PushupVariationId.STANDARD))
+        fun frontPose(bend: Float): List<PosePoint> {
+            val list = MutableList(33) { PosePoint(0.5f, 0.5f, 0.1f) }
+            // Facing camera straight-on: wide shoulders, both arms visible, foreshortened torso
+            list[11] = PosePoint(0.32f, 0.38f + bend * 0.18f, 0.98f)
+            list[12] = PosePoint(0.68f, 0.38f + bend * 0.18f, 0.98f)
+            list[13] = PosePoint(0.24f - bend * 0.12f, 0.54f + bend * 0.05f, 0.98f)
+            list[14] = PosePoint(0.76f + bend * 0.12f, 0.54f + bend * 0.05f, 0.98f)
+            list[15] = PosePoint(0.26f, 0.72f, 0.98f)
+            list[16] = PosePoint(0.74f, 0.72f, 0.98f)
+            list[23] = PosePoint(0.40f, 0.48f + bend * 0.10f, 0.90f)
+            list[24] = PosePoint(0.60f, 0.48f + bend * 0.10f, 0.90f)
+            return list
+        }
+
+        var t = 1000L
+        repeat(6) {
+            val out = analyzer.analyze(frontPose(0f), 480, 640, false, t)
+            assertTrue(out.state.isFrontView)
+            t += 60L
+        }
+        repeat(8) {
+            analyzer.analyze(frontPose(1f), 480, 640, false, t)
+            t += 80L
+        }
+        repeat(8) {
+            analyzer.analyze(frontPose(0f), 480, 640, false, t)
+            t += 80L
+        }
+        assertEquals(1, analyzer.getReps())
+    }
+
+    @Test
     fun detectsHipSagFormError() {
         val analyzer = PushupAnalyzer(PushupCatalog.get(PushupVariationId.STANDARD))
         var sawError = false

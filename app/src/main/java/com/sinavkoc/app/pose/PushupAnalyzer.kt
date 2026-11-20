@@ -164,11 +164,34 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         }
         lastUseRight = useRight
 
+        // Auto-detect FRONT/DIAGONAL view vs SIDE profile view
+        val lShoulder = displayLandmarks[11]
+        val rShoulder = displayLandmarks[12]
+        val lElbow = displayLandmarks[13]
+        val rElbow = displayLandmarks[14]
+        val lWrist = displayLandmarks[15]
+        val rWrist = displayLandmarks[16]
+        val lHip = displayLandmarks[23]
+        val rHip = displayLandmarks[24]
+
+        val bothArmsVisible = lShoulder.visibility > 0.35f && rShoulder.visibility > 0.35f &&
+            lElbow.visibility > 0.30f && rElbow.visibility > 0.30f &&
+            lWrist.visibility > 0.25f && rWrist.visibility > 0.25f
+
+        val shoulderSpanPx = abs(lShoulder.x - rShoulder.x) * imgW
+        val shoulderMidX = (lShoulder.x + rShoulder.x) * 0.5f
+        val shoulderMidY = (lShoulder.y + rShoulder.y) * 0.5f
+        val hipMidX = (lHip.x + rHip.x) * 0.5f
+        val hipMidY = (lHip.y + rHip.y) * 0.5f
+        val torsoSpanPx = abs(shoulderMidX - hipMidX) * imgW
+
+        val isFrontView = bothArmsVisible && shoulderSpanPx > imgW * 0.14f && shoulderSpanPx > torsoSpanPx * 0.85f
+
         val chosenIdx = if (useRight) rightIdx else leftIdx
         val avgKeyVis = chosenIdx.map { displayLandmarks[it].visibility }.average().toFloat()
         val minKeyVis = chosenIdx.minOf { displayLandmarks[it].visibility }
 
-        if (avgKeyVis < 0.32f || minKeyVis < 0.15f) {
+        if (!isFrontView && (avgKeyVis < 0.32f || minKeyVis < 0.15f)) {
             lowVisFrames += 1
             if (lowVisFrames >= 5) {
                 downHoldFrames = 0
@@ -182,6 +205,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         currentScore = getAverageScore(),
                         landmarks = displayLandmarks,
                         activeSideRight = useRight,
+                        isFrontView = false,
                         imageWidth = imgW,
                         imageHeight = imgH
                     )
@@ -211,13 +235,26 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val lowerIdx = if (useKnee) kIdx else aIdx
         val lower = displayLandmarks[lowerIdx]
 
-        // Prefer true 3D World Landmarks (eliminates 2D perspective distortion when going down!)
+        // Prefer true 3D World Landmarks; in Front View average BOTH arms for rock-solid accuracy!
         val hasWorld = worldLandmarks.size >= 29
-        val rawElbow = if (hasWorld) {
+        val rawElbow = if (isFrontView) {
+            val leftAng = if (hasWorld) {
+                calcAngle3D(worldLandmarks[11], worldLandmarks[13], worldLandmarks[15])
+            } else {
+                calcAnglePx(lShoulder, lElbow, lWrist, imgW, imgH)
+            }
+            val rightAng = if (hasWorld) {
+                calcAngle3D(worldLandmarks[12], worldLandmarks[14], worldLandmarks[16])
+            } else {
+                calcAnglePx(rShoulder, rElbow, rWrist, imgW, imgH)
+            }
+            (leftAng + rightAng) * 0.5f
+        } else if (hasWorld) {
             calcAngle3D(worldLandmarks[sIdx], worldLandmarks[eIdx], worldLandmarks[wIdx])
         } else {
             calcAnglePx(shoulder, elbow, wrist, imgW, imgH)
         }
+
         val rawBody = if (hasWorld) {
             calcAngle3D(worldLandmarks[sIdx], worldLandmarks[hIdx], worldLandmarks[lowerIdx])
         } else {
@@ -230,17 +267,28 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         smoothedElbow = elbowAngle
         smoothedBody = bodyAngle
 
-        // 2. Pushup posture verification
-        val dxPx = abs(shoulder.x - hip.x) * imgW
-        val dyPx = abs(shoulder.y - hip.y) * imgH
-        val maxVertRatio = when (variation.id) {
-            PushupVariationId.KNEE, PushupVariationId.INCLINE -> 2.6f
-            else -> 1.85f
+        // 2. Pushup posture verification (supports BOTH Front/Diagonal View AND Side View!)
+        val isPushupPosture = if (isFrontView) {
+            val wristMidY = (lWrist.y + rWrist.y) * 0.5f
+            val torsoVertPx = abs(hipMidY - shoulderMidY) * imgH
+            val handsNotAboveHead = (wristMidY - shoulderMidY) > -0.10f
+            // Standing upright has tall vertical torso (> 1.45x shoulder width); front pushup is foreshortened
+            val notStandingTall = torsoVertPx < shoulderSpanPx * 1.45f || (lHip.visibility < 0.35f && rHip.visibility < 0.35f)
+            handsNotAboveHead && notStandingTall
+        } else {
+            val dxPx = abs(shoulder.x - hip.x) * imgW
+            val dyPx = abs(shoulder.y - hip.y) * imgH
+            val maxVertRatio = when (variation.id) {
+                PushupVariationId.KNEE, PushupVariationId.INCLINE -> 2.6f
+                else -> 1.85f
+            }
+            val handsNotAboveHead = (wrist.y - shoulder.y) > -0.08f
+            (dxPx > imgW * 0.045f) &&
+                (dyPx / (dxPx + 0.001f) < maxVertRatio) &&
+                handsNotAboveHead
         }
-        val handsNotAboveHead = (wrist.y - shoulder.y) > -0.08f
-        val isPushupPosture = (dxPx > imgW * 0.045f) &&
-            (dyPx / (dxPx + 0.001f) < maxVertRatio) &&
-            handsNotAboveHead
+
+        val activeShoulderY = if (isFrontView) shoulderMidY else shoulder.y
 
         if (!isPushupPosture) {
             idleResetFrames += 1
@@ -261,10 +309,11 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     bodyAngle = bodyAngle.roundToInt(),
                     depthPercent = 0f,
                     severity = FormSeverity.WARNING,
-                    feedbackText = "Şınav pozisyonuna geç — yan profilden tüm gövden görünsün",
+                    feedbackText = "Şınav pozisyonuna geç (ön veya yan açıdan çalışır)",
                     currentScore = getAverageScore(),
                     landmarks = displayLandmarks,
                     activeSideRight = useRight,
+                    isFrontView = isFrontView,
                     imageWidth = imgW,
                     imageHeight = imgH
                 )
@@ -276,8 +325,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val t = variation.thresholds
         val activeIssues = mutableListOf<FormIssue>()
 
-        // 3. Sustained hip sag / hip pike check (requires 5 consecutive frames so descent transitions don't flash red!)
-        if (bodyAngle < t.minBodyAngle) {
+        // 3. Sustained hip sag / hip pike check (only in side view or when hips & legs are clearly visible in 3D)
+        val canCheckBodyLine = !isFrontView || (hasWorld && hip.visibility > 0.55f && lower.visibility > 0.55f)
+        if (canCheckBodyLine && bodyAngle < t.minBodyAngle) {
             val isSag = if (hasWorld) {
                 // In MediaPipe 3D world coords, +y points down toward gravity
                 val wS = worldLandmarks[sIdx]
@@ -346,7 +396,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
 
         if (phase == "UP" || phase == "DOWN") {
             if (elbowAngle < repMinElbow) repMinElbow = elbowAngle
-            if (shoulder.y > maxShoulderY) maxShoulderY = shoulder.y
+            if (activeShoulderY > maxShoulderY) maxShoulderY = activeShoulderY
             repIssues.addAll(activeIssues)
             if (FormIssue.HIP_SAG in activeIssues || FormIssue.HIP_PIKE in activeIssues) {
                 repBrokenFormFrames += 1
@@ -366,8 +416,8 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         downHoldFrames = 0
                         repStartMs = nowMs
                         repMinElbow = elbowAngle
-                        topShoulderY = shoulder.y
-                        maxShoulderY = shoulder.y
+                        topShoulderY = activeShoulderY
+                        maxShoulderY = activeShoulderY
                         repIssues.clear()
                         repBrokenFormFrames = 0
                     }
@@ -377,7 +427,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             }
             "UP" -> {
                 if (elbowAngle >= t.upAngle - 8f && !attemptedDescent) {
-                    topShoulderY = topShoulderY * 0.8f + shoulder.y * 0.2f
+                    topShoulderY = topShoulderY * 0.8f + activeShoulderY * 0.2f
                     maxShoulderY = topShoulderY
                 }
                 if (elbowAngle < t.upAngle - 22f && !attemptedDescent) {
@@ -463,8 +513,8 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         downHoldFrames = 0
                         repStartMs = nowMs
                         repMinElbow = 180f
-                        topShoulderY = shoulder.y
-                        maxShoulderY = shoulder.y
+                        topShoulderY = activeShoulderY
+                        maxShoulderY = activeShoulderY
                         repIssues.clear()
                         repBrokenFormFrames = 0
                         attemptedDescent = false
@@ -506,6 +556,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                 currentScore = getAverageScore(),
                 landmarks = displayLandmarks,
                 activeSideRight = useRight,
+                isFrontView = isFrontView,
                 imageWidth = imgW,
                 imageHeight = imgH
             ),
