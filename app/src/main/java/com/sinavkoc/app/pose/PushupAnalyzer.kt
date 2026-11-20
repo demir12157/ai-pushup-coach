@@ -17,9 +17,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
 
     private var smoothedElbow: Float? = null
     private var smoothedBody: Float? = null
+    private var lastUseRight = false
 
-    // Anti-shake & stability trackers
-    private var prevWrist: PosePoint? = null
+    // Stability & debounce trackers
     private var unstableUntilMs = 0L
     private var downHoldFrames = 0
     private var upHoldFrames = 0
@@ -42,7 +42,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         issueCounts.clear()
         smoothedElbow = null
         smoothedBody = null
-        prevWrist = null
+        lastUseRight = false
         unstableUntilMs = 0L
         downHoldFrames = 0
         upHoldFrames = 0
@@ -61,11 +61,19 @@ class PushupAnalyzer(private var variation: PushupVariation) {
     fun getAverageScore(): Int =
         if (repRecords.isEmpty()) 100 else (repRecords.sumOf { it.score } / repRecords.size)
 
-    fun analyze(landmarks: List<PosePoint>, nowMs: Long = System.currentTimeMillis()): AnalysisOutput {
-        if (landmarks.size < 29) {
+    fun analyze(
+        landmarks: List<PosePoint>,
+        isPhoneShaking: Boolean = false,
+        nowMs: Long = System.currentTimeMillis()
+    ): AnalysisOutput {
+        // 1. Hardware IMU shake detection (real gyroscope/accelerometer — zero false positives when stationary!)
+        if (isPhoneShaking) {
+            unstableUntilMs = nowMs + 850L
             downHoldFrames = 0
             upHoldFrames = 0
-            prevWrist = null
+        }
+
+        if (nowMs < unstableUntilMs) {
             return AnalysisOutput(
                 LivePoseState(
                     phase = phase,
@@ -74,9 +82,29 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     bodyAngle = smoothedBody?.roundToInt(),
                     depthPercent = 0f,
                     severity = FormSeverity.WARNING,
-                    feedbackText = "Telefonu sabit bir yere yasla ve yan profilden kadraja gir",
+                    feedbackText = "Telefon hareket ediyor! Sabit bir yere yasla",
                     currentScore = getAverageScore(),
-                    landmarks = landmarks
+                    landmarks = landmarks,
+                    activeSideRight = lastUseRight
+                )
+            )
+        }
+
+        if (landmarks.size < 29) {
+            downHoldFrames = 0
+            upHoldFrames = 0
+            return AnalysisOutput(
+                LivePoseState(
+                    phase = phase,
+                    reps = reps,
+                    elbowAngle = smoothedElbow?.roundToInt(),
+                    bodyAngle = smoothedBody?.roundToInt(),
+                    depthPercent = 0f,
+                    severity = FormSeverity.WARNING,
+                    feedbackText = "Yan profilden tüm vücudun görünecek şekilde kadraja gir",
+                    currentScore = getAverageScore(),
+                    landmarks = landmarks,
+                    activeSideRight = lastUseRight
                 )
             )
         }
@@ -85,12 +113,19 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val rightIdx = listOf(12, 14, 16, 24)
         val leftVis = leftIdx.map { landmarks[it].visibility }.average().toFloat()
         val rightVis = rightIdx.map { landmarks[it].visibility }.average().toFloat()
-        val useRight = rightVis > leftVis
+
+        // Hysteresis so left/right doesn't flip-flop rapidly
+        val useRight = if (lastUseRight) {
+            rightVis + 0.08f >= leftVis
+        } else {
+            rightVis > leftVis + 0.08f
+        }
+        lastUseRight = useRight
+
         val chosenIdx = if (useRight) rightIdx else leftIdx
         val minKeyVis = chosenIdx.minOf { landmarks[it].visibility }
 
-        // Require all 4 key joints (shoulder, elbow, wrist, hip) clearly visible
-        if (minKeyVis < 0.50f) {
+        if (minKeyVis < 0.35f) {
             downHoldFrames = 0
             upHoldFrames = 0
             return AnalysisOutput(
@@ -114,59 +149,29 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val ankle = landmarks[if (useRight) 28 else 27]
         val ear = landmarks[if (useRight) 8 else 7]
 
-        // 1. Camera shake / moving hand detection:
-        // During a real pushup, wrists stay planted on the floor.
-        prevWrist?.let { prev ->
-            val wristJump = hypot((wrist.x - prev.x).toDouble(), (wrist.y - prev.y).toDouble()).toFloat()
-            if (wristJump > 0.065f) {
-                unstableUntilMs = nowMs + 900L
-                downHoldFrames = 0
-                upHoldFrames = 0
-            }
-        }
-        prevWrist = wrist
-
-        if (nowMs < unstableUntilMs) {
-            return AnalysisOutput(
-                LivePoseState(
-                    phase = phase,
-                    reps = reps,
-                    elbowAngle = smoothedElbow?.roundToInt(),
-                    bodyAngle = smoothedBody?.roundToInt(),
-                    depthPercent = 0f,
-                    severity = FormSeverity.WARNING,
-                    feedbackText = "Kamera hareket ediyor! Telefonu sabit bir yere yasla",
-                    currentScore = getAverageScore(),
-                    landmarks = landmarks,
-                    activeSideRight = useRight
-                )
-            )
-        }
-
-        val lower = if (variation.thresholds.useKneeLine || ankle.visibility < 0.40f) knee else ankle
+        val lower = if (variation.thresholds.useKneeLine || ankle.visibility < 0.35f) knee else ankle
 
         val rawElbow = calcAngle(shoulder, elbow, wrist)
         val rawBody = calcAngle(shoulder, hip, lower)
 
-        val alpha = 0.30f
+        val alpha = 0.32f
         val elbowAngle = smoothedElbow?.let { it * (1f - alpha) + rawElbow * alpha } ?: rawElbow
         val bodyAngle = smoothedBody?.let { it * (1f - alpha) + rawBody * alpha } ?: rawBody
         smoothedElbow = elbowAngle
         smoothedBody = bodyAngle
 
-        // 2. Continuous pushup posture verification:
-        // Torso must be plank-like (not standing upright) AND hands below shoulders
+        // 2. Continuous pushup posture check (plank orientation + hands below shoulders)
         val dx = abs(shoulder.x - hip.x)
         val dy = abs(shoulder.y - hip.y)
-        val maxVertRatio = if (variation.id == PushupVariationId.INCLINE) 2.0f else 1.25f
-        val handsBelowShoulders = wrist.y > shoulder.y + 0.03f
-        val isPushupPosture = dx > 0.08f && (dy / (dx + 0.001f)) < maxVertRatio && handsBelowShoulders
+        val maxVertRatio = if (variation.id == PushupVariationId.INCLINE) 2.2f else 1.45f
+        val handsBelowShoulders = wrist.y > shoulder.y + 0.02f
+        val isPushupPosture = dx > 0.06f && (dy / (dx + 0.001f)) < maxVertRatio && handsBelowShoulders
 
         if (!isPushupPosture) {
             idleResetFrames += 1
             downHoldFrames = 0
             upHoldFrames = 0
-            if (idleResetFrames >= 5) {
+            if (idleResetFrames >= 6) {
                 phase = "IDLE"
                 attemptedDescent = false
                 repMinElbow = 180f
@@ -226,10 +231,10 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         var completedRep: RepRecord? = null
         var voiceCue: String? = null
 
-        // 3. Debounced state machine (requires 3 consecutive frames + actual vertical shoulder travel)
+        // 3. Debounced state machine (3 consecutive frames + vertical shoulder travel)
         when (phase) {
             "IDLE" -> {
-                if (elbowAngle >= t.upAngle - 10f) {
+                if (elbowAngle >= t.upAngle - 12f) {
                     upHoldFrames += 1
                     if (upHoldFrames >= 3) {
                         phase = "UP"
@@ -247,7 +252,6 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             }
             "UP" -> {
                 if (elbowAngle >= t.upAngle - 8f && !attemptedDescent) {
-                    // Continuously calibrate top shoulder height while waiting in plank
                     topShoulderY = topShoulderY * 0.8f + shoulder.y * 0.2f
                     maxShoulderY = topShoulderY
                 }
@@ -257,7 +261,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                 }
                 if (elbowAngle <= t.downAngle) {
                     downHoldFrames += 1
-                    if (downHoldFrames >= 3) {
+                    if (downHoldFrames >= 2) {
                         phase = "DOWN"
                         downHoldFrames = 0
                         upHoldFrames = 0
@@ -283,14 +287,13 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             "DOWN" -> {
                 if (elbowAngle >= t.upAngle) {
                     upHoldFrames += 1
-                    if (upHoldFrames >= 3) {
+                    if (upHoldFrames >= 2) {
                         val durationMs = if (repStartMs > 0L) nowMs - repStartMs else 1500L
                         val verticalTravel = maxShoulderY - topShoulderY
 
-                        // Reject impossible ultra-fast glitches or zero vertical movement
-                        if (durationMs >= 550L && verticalTravel >= 0.035f) {
+                        if (durationMs >= 500L && verticalTravel >= 0.025f) {
                             reps += 1
-                            if (durationMs < 850L) {
+                            if (durationMs < 800L) {
                                 repIssues.add(FormIssue.TOO_FAST)
                             }
 

@@ -1,5 +1,10 @@
 package com.sinavkoc.app.ui.screens
 
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -37,7 +42,10 @@ import com.sinavkoc.app.pose.PushupAnalyzer
 import com.sinavkoc.app.ui.theme.*
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 private val SKELETON_EDGES = listOf(
     11 to 13, 13 to 15,
@@ -70,6 +78,49 @@ fun CameraWorkoutScreen(
 
     val analyzer = remember(variation.id) { PushupAnalyzer(variation) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    val isPhoneShakingRef = remember { AtomicBoolean(false) }
+
+    // Hardware accelerometer/gyroscope listener — only flags shake if the phone physically moves!
+    DisposableEffect(context) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val gyro = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        val accel = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                when (event.sensor.type) {
+                    Sensor.TYPE_GYROSCOPE -> {
+                        val mag = sqrt(
+                            event.values[0] * event.values[0] +
+                                event.values[1] * event.values[1] +
+                                event.values[2] * event.values[2]
+                        )
+                        if (mag > 1.35f) {
+                            isPhoneShakingRef.set(true)
+                        }
+                    }
+                    Sensor.TYPE_ACCELEROMETER -> {
+                        val mag = sqrt(
+                            event.values[0] * event.values[0] +
+                                event.values[1] * event.values[1] +
+                                event.values[2] * event.values[2]
+                        )
+                        if (abs(mag - 9.81f) > 2.8f) {
+                            isPhoneShakingRef.set(true)
+                        }
+                    }
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        gyro?.let { sensorManager.registerListener(listener, it, SensorManager.SENSOR_DELAY_GAME) }
+        accel?.let { sensorManager.registerListener(listener, it, SensorManager.SENSOR_DELAY_GAME) }
+
+        onDispose {
+            sensorManager?.unregisterListener(listener)
+        }
+    }
 
     LaunchedEffect(Unit) {
         voiceCoach.speak("${variation.name} başladı. Yan profilden pozisyon al.", priority = true)
@@ -83,7 +134,8 @@ fun CameraWorkoutScreen(
         PoseLandmarkerHelper(
             context = context,
             onResult = { points ->
-                val out = analyzer.analyze(points)
+                val shaking = isPhoneShakingRef.getAndSet(false)
+                val out = analyzer.analyze(points, isPhoneShaking = shaking)
                 liveState = out.state
                 if (out.repCompleted != null) {
                     voiceCoach.announceRep(
