@@ -85,6 +85,25 @@ class PushupAnalyzerTest {
     }
 
     @Test
+    fun doesNotCountRepWhenFormIsRed() {
+        val analyzer = PushupAnalyzer(PushupCatalog.get(PushupVariationId.STANDARD))
+        var t = 1000L
+        repeat(8) {
+            analyzer.analyze(makePose(0f, hipSag = 0.14f), 480, 640, false, t)
+            t += 60L
+        }
+        repeat(10) {
+            analyzer.analyze(makePose(1f, hipSag = 0.14f), 480, 640, false, t)
+            t += 70L
+        }
+        repeat(10) {
+            analyzer.analyze(makePose(0f, hipSag = 0.14f), 480, 640, false, t)
+            t += 70L
+        }
+        assertEquals(0, analyzer.getReps())
+    }
+
+    @Test
     fun detectsHipSagFormError() {
         val analyzer = PushupAnalyzer(PushupCatalog.get(PushupVariationId.STANDARD))
         var sawError = false

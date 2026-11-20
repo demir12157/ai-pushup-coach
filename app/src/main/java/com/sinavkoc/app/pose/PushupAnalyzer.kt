@@ -33,8 +33,11 @@ class PushupAnalyzer(private var variation: PushupVariation) {
     private var topShoulderY = 0f
     private var maxShoulderY = 0f
     private val repIssues = mutableSetOf<FormIssue>()
+    private var repBrokenFormFrames = 0
     private var attemptedDescent = false
     private var lastShallowAlertMs = 0L
+    private var rejectedUntilMs = 0L
+    private var rejectedFeedback = ""
 
     @Synchronized
     fun reset(newVariation: PushupVariation = variation) {
@@ -57,8 +60,11 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         topShoulderY = 0f
         maxShoulderY = 0f
         repIssues.clear()
+        repBrokenFormFrames = 0
         attemptedDescent = false
         lastShallowAlertMs = 0L
+        rejectedUntilMs = 0L
+        rejectedFeedback = ""
     }
 
     @Synchronized
@@ -272,6 +278,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             if (elbowAngle < repMinElbow) repMinElbow = elbowAngle
             if (shoulder.y > maxShoulderY) maxShoulderY = shoulder.y
             repIssues.addAll(activeIssues)
+            if (FormIssue.HIP_SAG in activeIssues || FormIssue.HIP_PIKE in activeIssues) {
+                repBrokenFormFrames += 1
+            }
         }
 
         var completedRep: RepRecord? = null
@@ -337,32 +346,47 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         val durationMs = if (repStartMs > 0L) nowMs - repStartMs else 1500L
                         val verticalTravel = maxShoulderY - topShoulderY
 
+                        val formBroken = repBrokenFormFrames >= 4 ||
+                            FormIssue.HIP_SAG in activeIssues ||
+                            FormIssue.HIP_PIKE in activeIssues
+
                         if (durationMs >= 500L && verticalTravel >= 0.025f) {
-                            reps += 1
-                            if (durationMs < 800L) {
-                                repIssues.add(FormIssue.TOO_FAST)
+                            if (formBroken) {
+                                // Do NOT count rep when form is RED (hip sag / hip pike)!
+                                val brokenIssue = when {
+                                    FormIssue.HIP_SAG in repIssues -> FormIssue.HIP_SAG
+                                    FormIssue.HIP_PIKE in repIssues -> FormIssue.HIP_PIKE
+                                    else -> FormIssue.HIP_SAG
+                                }
+                                issueCounts[brokenIssue] = (issueCounts[brokenIssue] ?: 0) + 1
+                                rejectedUntilMs = nowMs + 2200L
+                                rejectedFeedback = "Tekrar sayılmadı! ${brokenIssue.liveCue}"
+                                voiceCue = "Sayılmadı! ${brokenIssue.voiceCue}"
+                            } else {
+                                reps += 1
+                                if (durationMs < 800L) {
+                                    repIssues.add(FormIssue.TOO_FAST)
+                                }
+
+                                val issues = repIssues.toList()
+                                issues.forEach { issue ->
+                                    issueCounts[issue] = (issueCounts[issue] ?: 0) + 1
+                                }
+
+                                var score = 100
+                                if (FormIssue.HEAD_DROP in repIssues) score -= 10
+                                if (FormIssue.TOO_FAST in repIssues) score -= 12
+                                score = score.coerceIn(50, 100)
+
+                                completedRep = RepRecord(
+                                    repNumber = reps,
+                                    minElbowAngle = repMinElbow.roundToInt(),
+                                    durationMs = durationMs,
+                                    score = score,
+                                    issues = issues
+                                )
+                                repRecords.add(completedRep)
                             }
-
-                            val issues = repIssues.toList()
-                            issues.forEach { issue ->
-                                issueCounts[issue] = (issueCounts[issue] ?: 0) + 1
-                            }
-
-                            var score = 100
-                            if (FormIssue.HIP_SAG in repIssues) score -= 20
-                            if (FormIssue.HIP_PIKE in repIssues) score -= 16
-                            if (FormIssue.HEAD_DROP in repIssues) score -= 10
-                            if (FormIssue.TOO_FAST in repIssues) score -= 12
-                            score = score.coerceIn(40, 100)
-
-                            completedRep = RepRecord(
-                                repNumber = reps,
-                                minElbowAngle = repMinElbow.roundToInt(),
-                                durationMs = durationMs,
-                                score = score,
-                                issues = issues
-                            )
-                            repRecords.add(completedRep)
                         }
 
                         phase = "UP"
@@ -373,6 +397,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         topShoulderY = shoulder.y
                         maxShoulderY = shoulder.y
                         repIssues.clear()
+                        repBrokenFormFrames = 0
                         attemptedDescent = false
                     }
                 } else {
@@ -381,7 +406,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             }
         }
 
-        val (severity, feedback) = if (activeIssues.isNotEmpty()) {
+        val (severity, feedback) = if (nowMs < rejectedUntilMs) {
+            FormSeverity.ERROR to rejectedFeedback
+        } else if (activeIssues.isNotEmpty()) {
             val primary = activeIssues.first()
             if (voiceCue == null) voiceCue = primary.voiceCue
             val sev = if (primary == FormIssue.HIP_SAG || primary == FormIssue.HIP_PIKE) {
