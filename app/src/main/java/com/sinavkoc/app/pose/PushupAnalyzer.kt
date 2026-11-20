@@ -17,15 +17,18 @@ class PushupAnalyzer(private var variation: PushupVariation) {
 
     private var smoothedElbow: Float? = null
     private var smoothedBody: Float? = null
+    private var smoothedLandmarks: List<PosePoint> = emptyList()
     private var lastUseRight = false
 
-    // Stability & debounce trackers
+    // Stability & persistence trackers
     private var unstableUntilMs = 0L
     private var downHoldFrames = 0
     private var upHoldFrames = 0
     private var idleResetFrames = 0
     private var lowVisFrames = 0
     private var headDropFrames = 0
+    private var hipSagFrames = 0
+    private var hipPikeFrames = 0
 
     // Per-rep trackers
     private var repStartMs = 0L
@@ -48,6 +51,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         issueCounts.clear()
         smoothedElbow = null
         smoothedBody = null
+        smoothedLandmarks = emptyList()
         lastUseRight = false
         unstableUntilMs = 0L
         downHoldFrames = 0
@@ -55,6 +59,8 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         idleResetFrames = 0
         lowVisFrames = 0
         headDropFrames = 0
+        hipSagFrames = 0
+        hipPikeFrames = 0
         repStartMs = 0L
         repMinElbow = 180f
         topShoulderY = 0f
@@ -83,12 +89,16 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         imageWidth: Int = 480,
         imageHeight: Int = 640,
         isPhoneShaking: Boolean = false,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        worldLandmarks: List<PosePoint> = emptyList()
     ): AnalysisOutput {
         val imgW = imageWidth.coerceAtLeast(1)
         val imgH = imageHeight.coerceAtLeast(1)
 
-        // 1. Hardware IMU shake detection (real gyroscope/accelerometer)
+        // Adaptive velocity-aware smoothing on 2D screen landmarks so skeleton is silky smooth
+        val displayLandmarks = smoothScreenLandmarks(landmarks)
+
+        // 1. Hardware IMU shake detection
         if (isPhoneShaking) {
             unstableUntilMs = nowMs + 850L
             downHoldFrames = 0
@@ -106,7 +116,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     severity = FormSeverity.WARNING,
                     feedbackText = "Telefon hareket ediyor! Sabit bir yere yasla",
                     currentScore = getAverageScore(),
-                    landmarks = landmarks,
+                    landmarks = displayLandmarks,
                     activeSideRight = lastUseRight,
                     imageWidth = imgW,
                     imageHeight = imgH
@@ -114,7 +124,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             )
         }
 
-        if (landmarks.size < 29) {
+        if (displayLandmarks.size < 29) {
             downHoldFrames = 0
             upHoldFrames = 0
             return AnalysisOutput(
@@ -127,7 +137,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     severity = FormSeverity.WARNING,
                     feedbackText = "Yan profilden tüm vücudun görünecek şekilde kadraja gir",
                     currentScore = getAverageScore(),
-                    landmarks = landmarks,
+                    landmarks = displayLandmarks,
                     activeSideRight = lastUseRight,
                     imageWidth = imgW,
                     imageHeight = imgH
@@ -137,10 +147,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
 
         val leftIdx = listOf(11, 13, 15, 23)
         val rightIdx = listOf(12, 14, 16, 24)
-        val leftVis = leftIdx.map { landmarks[it].visibility }.average().toFloat()
-        val rightVis = rightIdx.map { landmarks[it].visibility }.average().toFloat()
+        val leftVis = leftIdx.map { displayLandmarks[it].visibility }.average().toFloat()
+        val rightVis = rightIdx.map { displayLandmarks[it].visibility }.average().toFloat()
 
-        // Hysteresis so left/right side doesn't flicker
         val useRight = if (lastUseRight) {
             rightVis + 0.08f >= leftVis
         } else {
@@ -149,8 +158,8 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         lastUseRight = useRight
 
         val chosenIdx = if (useRight) rightIdx else leftIdx
-        val avgKeyVis = chosenIdx.map { landmarks[it].visibility }.average().toFloat()
-        val minKeyVis = chosenIdx.minOf { landmarks[it].visibility }
+        val avgKeyVis = chosenIdx.map { displayLandmarks[it].visibility }.average().toFloat()
+        val minKeyVis = chosenIdx.minOf { displayLandmarks[it].visibility }
 
         if (avgKeyVis < 0.32f || minKeyVis < 0.15f) {
             lowVisFrames += 1
@@ -164,7 +173,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         severity = FormSeverity.WARNING,
                         feedbackText = "Tüm vücudun net görünmüyor, kameradan biraz uzaklaş",
                         currentScore = getAverageScore(),
-                        landmarks = landmarks,
+                        landmarks = displayLandmarks,
                         activeSideRight = useRight,
                         imageWidth = imgW,
                         imageHeight = imgH
@@ -175,29 +184,46 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             lowVisFrames = 0
         }
 
-        val shoulder = landmarks[if (useRight) 12 else 11]
-        val elbow = landmarks[if (useRight) 14 else 13]
-        val wrist = landmarks[if (useRight) 16 else 15]
-        val hip = landmarks[if (useRight) 24 else 23]
-        val knee = landmarks[if (useRight) 26 else 25]
-        val ankle = landmarks[if (useRight) 28 else 27]
-        val ear = landmarks[if (useRight) 8 else 7]
+        val sIdx = if (useRight) 12 else 11
+        val eIdx = if (useRight) 14 else 13
+        val wIdx = if (useRight) 16 else 15
+        val hIdx = if (useRight) 24 else 23
+        val kIdx = if (useRight) 26 else 25
+        val aIdx = if (useRight) 28 else 27
+        val earIdx = if (useRight) 8 else 7
 
-        val lower = if (variation.thresholds.useKneeLine || ankle.visibility < 0.35f) knee else ankle
+        val shoulder = displayLandmarks[sIdx]
+        val elbow = displayLandmarks[eIdx]
+        val wrist = displayLandmarks[wIdx]
+        val hip = displayLandmarks[hIdx]
+        val knee = displayLandmarks[kIdx]
+        val ankle = displayLandmarks[aIdx]
+        val ear = displayLandmarks[earIdx]
 
-        // Aspect-ratio corrected angle calculation (true pixel coordinates!)
-        val rawElbow = calcAnglePx(shoulder, elbow, wrist, imgW, imgH)
-        val rawBody = calcAnglePx(shoulder, hip, lower, imgW, imgH)
+        val useKnee = variation.thresholds.useKneeLine || ankle.visibility < 0.35f
+        val lowerIdx = if (useKnee) kIdx else aIdx
+        val lower = displayLandmarks[lowerIdx]
 
-        val alpha = 0.32f
+        // Prefer true 3D World Landmarks (eliminates 2D perspective distortion when going down!)
+        val hasWorld = worldLandmarks.size >= 29
+        val rawElbow = if (hasWorld) {
+            calcAngle3D(worldLandmarks[sIdx], worldLandmarks[eIdx], worldLandmarks[wIdx])
+        } else {
+            calcAnglePx(shoulder, elbow, wrist, imgW, imgH)
+        }
+        val rawBody = if (hasWorld) {
+            calcAngle3D(worldLandmarks[sIdx], worldLandmarks[hIdx], worldLandmarks[lowerIdx])
+        } else {
+            calcAnglePx(shoulder, hip, lower, imgW, imgH)
+        }
+
+        val alpha = 0.30f
         val elbowAngle = smoothedElbow?.let { it * (1f - alpha) + rawElbow * alpha } ?: rawElbow
         val bodyAngle = smoothedBody?.let { it * (1f - alpha) + rawBody * alpha } ?: rawBody
         smoothedElbow = elbowAngle
         smoothedBody = bodyAngle
 
-        // 2. Pushup posture verification in true pixel geometry
-        // Allows steep torso angle for Knee/Incline & diagonal camera views,
-        // and allows shoulders to drop all the way to wrist/floor level at bottom of a deep pushup!
+        // 2. Pushup posture verification
         val dxPx = abs(shoulder.x - hip.x) * imgW
         val dyPx = abs(shoulder.y - hip.y) * imgH
         val maxVertRatio = when (variation.id) {
@@ -218,6 +244,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                 attemptedDescent = false
                 repMinElbow = 180f
                 repIssues.clear()
+                repBrokenFormFrames = 0
             }
             return AnalysisOutput(
                 LivePoseState(
@@ -229,7 +256,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     severity = FormSeverity.WARNING,
                     feedbackText = "Şınav pozisyonuna geç — yan profilden tüm gövden görünsün",
                     currentScore = getAverageScore(),
-                    landmarks = landmarks,
+                    landmarks = displayLandmarks,
                     activeSideRight = useRight,
                     imageWidth = imgW,
                     imageHeight = imgH
@@ -242,21 +269,57 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val t = variation.thresholds
         val activeIssues = mutableListOf<FormIssue>()
 
-        // Hip sag vs hip pike
+        // 3. Sustained hip sag / hip pike check (requires 5 consecutive frames so descent transitions don't flash red!)
         if (bodyAngle < t.minBodyAngle) {
-            val spanX = lower.x - shoulder.x
-            if (abs(spanX) > 0.05f) {
-                val ratio = ((hip.x - shoulder.x) / spanX).coerceIn(0f, 1f)
-                val expectedY = shoulder.y + ratio * (lower.y - shoulder.y)
-                if (hip.y > expectedY + 0.015f) {
-                    activeIssues.add(FormIssue.HIP_SAG)
-                } else if (hip.y < expectedY - 0.015f) {
-                    activeIssues.add(FormIssue.HIP_PIKE)
-                }
+            val isSag = if (hasWorld) {
+                // In MediaPipe 3D world coords, +y points down toward gravity
+                val wS = worldLandmarks[sIdx]
+                val wH = worldLandmarks[hIdx]
+                val wL = worldLandmarks[lowerIdx]
+                val expectedY = (wS.y + wL.y) * 0.5f
+                wH.y > expectedY + 0.03f
+            } else {
+                val spanX = lower.x - shoulder.x
+                if (abs(spanX) > 0.05f) {
+                    val ratio = ((hip.x - shoulder.x) / spanX).coerceIn(0f, 1f)
+                    val expectedY = shoulder.y + ratio * (lower.y - shoulder.y)
+                    hip.y > expectedY + 0.02f
+                } else false
             }
+
+            val isPike = if (hasWorld) {
+                val wS = worldLandmarks[sIdx]
+                val wH = worldLandmarks[hIdx]
+                val wL = worldLandmarks[lowerIdx]
+                val expectedY = (wS.y + wL.y) * 0.5f
+                wH.y < expectedY - 0.03f
+            } else {
+                val spanX = lower.x - shoulder.x
+                if (abs(spanX) > 0.05f) {
+                    val ratio = ((hip.x - shoulder.x) / spanX).coerceIn(0f, 1f)
+                    val expectedY = shoulder.y + ratio * (lower.y - shoulder.y)
+                    hip.y < expectedY - 0.02f
+                } else false
+            }
+
+            if (isSag) {
+                hipSagFrames += 1
+                hipPikeFrames = 0
+                if (hipSagFrames >= 5) activeIssues.add(FormIssue.HIP_SAG)
+            } else if (isPike) {
+                hipPikeFrames += 1
+                hipSagFrames = 0
+                if (hipPikeFrames >= 5) activeIssues.add(FormIssue.HIP_PIKE)
+            } else {
+                hipSagFrames = 0
+                hipPikeFrames = 0
+            }
+        } else {
+            hipSagFrames = 0
+            hipPikeFrames = 0
         }
 
-        // Head drop (only flag if head drops clearly below shoulder for 6+ consecutive frames)
+        // Head drop (6 consecutive frames)
         if (ear.visibility > 0.55f) {
             val torsoLenPx = hypot(((shoulder.x - hip.x) * imgW).toDouble(), ((shoulder.y - hip.y) * imgH).toDouble()).toFloat()
             val earDropPx = (ear.y - shoulder.y) * imgH
@@ -286,7 +349,6 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         var completedRep: RepRecord? = null
         var voiceCue: String? = null
 
-        // 3. Debounced state machine
         when (phase) {
             "IDLE" -> {
                 if (elbowAngle >= t.upAngle - 16f) {
@@ -300,6 +362,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         topShoulderY = shoulder.y
                         maxShoulderY = shoulder.y
                         repIssues.clear()
+                        repBrokenFormFrames = 0
                     }
                 } else {
                     upHoldFrames = 0
@@ -346,13 +409,12 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                         val durationMs = if (repStartMs > 0L) nowMs - repStartMs else 1500L
                         val verticalTravel = maxShoulderY - topShoulderY
 
-                        val formBroken = repBrokenFormFrames >= 4 ||
+                        val formBroken = repBrokenFormFrames >= 6 ||
                             FormIssue.HIP_SAG in activeIssues ||
                             FormIssue.HIP_PIKE in activeIssues
 
                         if (durationMs >= 500L && verticalTravel >= 0.025f) {
                             if (formBroken) {
-                                // Do NOT count rep when form is RED (hip sag / hip pike)!
                                 val brokenIssue = when {
                                     FormIssue.HIP_SAG in repIssues -> FormIssue.HIP_SAG
                                     FormIssue.HIP_PIKE in repIssues -> FormIssue.HIP_PIKE
@@ -435,7 +497,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                 severity = severity,
                 feedbackText = feedback,
                 currentScore = getAverageScore(),
-                landmarks = landmarks,
+                landmarks = displayLandmarks,
                 activeSideRight = useRight,
                 imageWidth = imgW,
                 imageHeight = imgH
@@ -443,6 +505,49 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             repCompleted = completedRep,
             voiceCue = voiceCue
         )
+    }
+
+    private fun smoothScreenLandmarks(raw: List<PosePoint>): List<PosePoint> {
+        if (raw.size < 29) {
+            smoothedLandmarks = emptyList()
+            return raw
+        }
+        if (smoothedLandmarks.size != raw.size) {
+            smoothedLandmarks = raw
+            return raw
+        }
+        val next = raw.indices.map { i ->
+            val prev = smoothedLandmarks[i]
+            val curr = raw[i]
+            val dist = hypot((curr.x - prev.x).toDouble(), (curr.y - prev.y).toDouble()).toFloat()
+            // Adaptive alpha: steady when still (0.25), responsive when moving fast (0.60)
+            val a = (0.25f + dist * 6f).coerceIn(0.25f, 0.65f)
+            PosePoint(
+                x = prev.x + (curr.x - prev.x) * a,
+                y = prev.y + (curr.y - prev.y) * a,
+                visibility = prev.visibility * 0.7f + curr.visibility * 0.3f,
+                z = prev.z + (curr.z - prev.z) * a
+            )
+        }
+        smoothedLandmarks = next
+        return next
+    }
+
+    private fun calcAngle3D(a: PosePoint, b: PosePoint, c: PosePoint): Float {
+        val bax = (a.x - b.x).toDouble()
+        val bay = (a.y - b.y).toDouble()
+        val baz = (a.z - b.z).toDouble()
+        val bcx = (c.x - b.x).toDouble()
+        val bcy = (c.y - b.y).toDouble()
+        val bcz = (c.z - b.z).toDouble()
+
+        val dot = bax * bcx + bay * bcy + baz * bcz
+        val magBA = sqrt(bax * bax + bay * bay + baz * baz)
+        val magBC = sqrt(bcx * bcx + bcy * bcy + bcz * bcz)
+        if (magBA < 1e-6 || magBC < 1e-6) return 180f
+
+        val cosTheta = (dot / (magBA * magBC)).coerceIn(-1.0, 1.0)
+        return Math.toDegrees(acos(cosTheta)).toFloat()
     }
 
     private fun calcAnglePx(a: PosePoint, b: PosePoint, c: PosePoint, imgW: Int, imgH: Int): Float {

@@ -12,8 +12,8 @@ android {
         applicationId = "com.sinavkoc.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.0.6"
+        versionCode = 9
+        versionName = "1.1.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")

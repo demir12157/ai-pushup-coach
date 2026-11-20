@@ -10,3 +10,4 @@
 *.aab
 *.keystore
 app/src/main/assets/pose_landmarker_lite.task
+app/src/main/assets/pose_landmarker_full.task

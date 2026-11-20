@@ -131,13 +131,14 @@ fun CameraWorkoutScreen(
     val landmarkerHelper = remember(variation.id) {
         PoseLandmarkerHelper(
             context = context,
-            onResult = { points, imgW, imgH ->
+            onResult = { points, worldPoints, imgW, imgH ->
                 val shaking = isPhoneShakingRef.getAndSet(false)
                 val out = analyzer.analyze(
                     landmarks = points,
                     imageWidth = imgW,
                     imageHeight = imgH,
-                    isPhoneShaking = shaking
+                    isPhoneShaking = shaking,
+                    worldLandmarks = worldPoints
                 )
                 mainHandler.post {
                     liveState = out.state

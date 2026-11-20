@@ -24,11 +24,11 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Download MediaPipe Pose Landmarker model (bundled offline)
+      - name: Download MediaPipe Pose Landmarker FULL model (bundled offline)
         run: |
           mkdir -p app/src/main/assets
-          curl -fSL -o app/src/main/assets/pose_landmarker_lite.task \
-            https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+          curl -fSL -o app/src/main/assets/pose_landmarker_full.task \
+            https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task
 
       - name: Run Unit Tests & Build Signed APK
         run: |
