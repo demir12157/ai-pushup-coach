@@ -1,45 +1,35 @@
-# AI Pushup Coach (Pure Rust)
+# AI Pushup Coach (ŞınavKoç) — Native Android
 
-A **100% Pure Rust** pushup counter, real-time form analyzer, and progress tracker — **zero JavaScript, zero React, zero Electron, zero WebView**.
-
-Built with **`eframe` / `egui`** for GPU-accelerated native UI, **`nokhwa`** for live desktop webcam capture, and **`cargo-apk`** for native Android APK builds.
+A **100% Native Android** AI pushup counter and real-time form coach built with **Kotlin**, **Jetpack Compose (Material 3)**, **CameraX**, and **Google MediaPipe Pose Landmarker** — zero WebView, zero JavaScript, zero Electron.
 
 ## Features
 
-- **6 Pushup Variations:** Standard, Wide, Diamond, Knee, Incline, and Decline — each with tailored joint angle thresholds, muscle targets, and form checklists.
-- **Real-Time Pose & Form Analysis (`src/analyzer.rs`):**
-  - Exponential Moving Average (EMA) smoothed elbow & body alignment angles
-  - Live skeleton overlay color-coded by form quality (green = good, amber = warning, red = form breakdown)
-  - Vertical depth gauge & live elbow/body degree indicators
-  - Real-time detection of **hip sag**, **high hips (piking)**, **shallow depth**, **head drop**, and **fast tempo**
-- **Progress Analytics & Local Storage (`src/storage.rs`):**
-  - Daily goal tracker, streak counter, 7-day bar chart, most frequent form mistakes, and workout history stored locally as JSON
-  - Post-workout summary with 0–100 form score and personalized coaching recommendations
-- **Simulation Mode:** Built-in synthetic pose simulator for testing without a camera.
+- **Real-Time 60 FPS Camera & AI Pose Tracking:** Hardware CameraX preview paired with Google MediaPipe Pose Landmarker (`pose_landmarker_lite.task` bundled offline inside the APK) tracking 33 body landmarks with a color-coded skeleton overlay and live depth/angle gauges.
+- **6 Pushup Variations:** Standard, Wide, Diamond, Knee, Incline, and Decline — each with tailored joint thresholds, muscle targets, camera tips, and form checklists.
+- **Live Form Coaching:** Detects **hip sag**, **high hips (piking)**, **shallow depth**, **head drop**, and **too fast tempo** in real time.
+- **Native Turkish Voice Coach:** Spoken rep count, milestones, and form cues via Android `TextToSpeech` + `ToneGenerator` audio feedback.
+- **Progress Analytics:** Daily goal tracker, streak counter, 7-day bar chart, most frequent form mistakes, workout history, and post-workout form score reports.
 
-## Quick Start (Desktop)
+## Download
 
-```bash
-cargo test
-cargo run --release
-```
+Grab the latest signed Android APK from the [Releases](https://github.com/demir12157/ai-pushup-coach/releases) page.
 
-## Android APK Build
+## Build from Source
 
-Every push to `main` automatically compiles both the **Android APK (`aarch64-linux-android`)** and **Windows `.exe`** via GitHub Actions (`.github/workflows/build-rust.yml`).
-
-To build locally with Android SDK + NDK installed:
-
-```bash
-rustup target add aarch64-linux-android
-cargo install cargo-apk --locked
-cargo apk build --release --target aarch64-linux-android
-```
+1. Download the MediaPipe model into `app/src/main/assets/pose_landmarker_lite.task`:
+   ```bash
+   mkdir -p app/src/main/assets
+   curl -L -o app/src/main/assets/pose_landmarker_lite.task \
+     https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+   ```
+2. Open in Android Studio or run:
+   ```bash
+   gradle assembleRelease
+   ```
 
 ## Tech Stack
 
-- **Language:** 100% Rust
-- **UI:** `eframe` / `egui` (OpenGL / Glow)
-- **Camera:** `nokhwa` (native desktop capture)
-- **Android Packaging:** `android-activity` + `cargo-apk`
-- **Persistence:** `serde` + `serde_json` + `chrono`
+- **Language & UI:** Kotlin + Jetpack Compose (Material 3)
+- **Camera:** AndroidX CameraX (front & back camera switching)
+- **AI Pose Detection:** Google MediaPipe Tasks Vision (`0.10.14`, offline bundled model)
+- **Voice Coach:** Native Android `TextToSpeech` + `ToneGenerator`
