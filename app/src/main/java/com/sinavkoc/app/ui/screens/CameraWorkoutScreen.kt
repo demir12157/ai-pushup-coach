@@ -13,6 +13,8 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,10 +28,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -73,6 +79,21 @@ fun CameraWorkoutScreen(
     var liveState by remember { mutableStateOf(LivePoseState()) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var elapsedSec by remember { mutableIntStateOf(0) }
+    var repPulse by remember { mutableStateOf(false) }
+
+    val repScale by animateFloatAsState(
+        targetValue = if (repPulse) 1.24f else 1f,
+        animationSpec = tween(durationMillis = 180),
+        label = "repScale"
+    )
+
+    LaunchedEffect(liveState.reps) {
+        if (liveState.reps > 0) {
+            repPulse = true
+            delay(200)
+            repPulse = false
+        }
+    }
 
     val analyzer = remember(variation.id) { PushupAnalyzer(variation) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -174,6 +195,8 @@ fun CameraWorkoutScreen(
     }
 
     LaunchedEffect(isFrontCamera) {
+        analyzer.onCameraFlipped()
+        errorMsg = null
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
             try {
@@ -291,6 +314,44 @@ fun CameraWorkoutScreen(
                     drawCircle(color = formColor, radius = 14f, center = center)
                     drawCircle(color = Color.White, radius = 8f, center = center)
                 }
+
+                // Draw crisp angle pills right next to elbow & hip
+                val elbowIdx = if (liveState.activeSideRight) 14 else 13
+                val hipIdx = if (liveState.activeSideRight) 24 else 23
+                val badgeBgPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.argb(190, 9, 13, 22)
+                    isAntiAlias = true
+                }
+                val badgeStrokePaint = android.graphics.Paint().apply {
+                    color = formColor.toArgb()
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = 3f
+                    isAntiAlias = true
+                }
+                val badgeTextPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.WHITE
+                    textSize = 32f
+                    isFakeBoldText = true
+                    isAntiAlias = true
+                }
+
+                fun drawJointLabel(idx: Int, text: String) {
+                    val p = lms[idx]
+                    if (p.visibility < 0.35f) return
+                    val pos = mapPoint(p)
+                    val tw = badgeTextPaint.measureText(text)
+                    val left = (pos.x + 22f).coerceIn(12f, size.width - tw - 44f)
+                    val top = (pos.y - 44f).coerceIn(120f, size.height - 260f)
+                    val rect = android.graphics.RectF(left, top, left + tw + 28f, top + 46f)
+                    drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.drawRoundRect(rect, 14f, 14f, badgeBgPaint)
+                        canvas.nativeCanvas.drawRoundRect(rect, 14f, 14f, badgeStrokePaint)
+                        canvas.nativeCanvas.drawText(text, left + 14f, top + 33f, badgeTextPaint)
+                    }
+                }
+
+                liveState.elbowAngle?.let { drawJointLabel(elbowIdx, "Dirsek ${it}°") }
+                liveState.bodyAngle?.let { drawJointLabel(hipIdx, "Bel ${it}°") }
             }
         }
 
@@ -466,6 +527,26 @@ fun CameraWorkoutScreen(
                 )
             }
 
+            // Target Goal Progress Bar
+            if (targetReps != null && targetReps > 0) {
+                val pct = (liveState.reps.toFloat() / targetReps).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color.White.copy(alpha = 0.15f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(pct)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Emerald)
+                    )
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -474,10 +555,11 @@ fun CameraWorkoutScreen(
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "${liveState.reps}",
-                        color = Color.White,
+                        color = if (repPulse) Emerald else Color.White,
                         fontSize = 58.sp,
                         fontWeight = FontWeight.Black,
-                        lineHeight = 58.sp
+                        lineHeight = 58.sp,
+                        modifier = Modifier.scale(repScale)
                     )
                     Column(modifier = Modifier.padding(bottom = 8.dp)) {
                         Text(

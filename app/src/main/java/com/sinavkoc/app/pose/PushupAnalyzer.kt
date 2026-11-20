@@ -74,6 +74,13 @@ class PushupAnalyzer(private var variation: PushupVariation) {
     }
 
     @Synchronized
+    fun onCameraFlipped() {
+        smoothedLandmarks = emptyList()
+        downHoldFrames = 0
+        upHoldFrames = 0
+    }
+
+    @Synchronized
     fun getReps(): Int = reps
 
     @Synchronized

@@ -43,7 +43,7 @@ fun ProgressScreen(
     val avgScore = if (sessions.isEmpty()) 0 else (sessions.sumOf { it.avgFormScore } / sessions.size)
     val dailyPct = ((todayReps.toFloat() / dailyGoal.coerceAtLeast(1)) * 100f).coerceIn(0f, 100f)
     val maxDay = (weekStats.maxOfOrNull { it.reps } ?: 10).coerceAtLeast(10)
-    val dateFmt = SimpleDateFormat("dd MMM HH:mm", Locale("tr", "TR"))
+    val dateFmt = androidx.compose.runtime.remember { SimpleDateFormat("dd MMM HH:mm", Locale("tr", "TR")) }
 
     Column(
         modifier = Modifier
