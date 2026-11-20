@@ -108,7 +108,9 @@ data class LivePoseState(
     val feedbackText: String = "Kameraya yan profilden tüm vücudun görünecek şekilde geç",
     val currentScore: Int = 100,
     val landmarks: List<PosePoint> = emptyList(),
-    val activeSideRight: Boolean = false
+    val activeSideRight: Boolean = false,
+    val imageWidth: Int = 480,
+    val imageHeight: Int = 640
 )
 
 object PushupCatalog {

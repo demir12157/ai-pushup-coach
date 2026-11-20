@@ -14,10 +14,11 @@ import com.sinavkoc.app.model.PosePoint
 
 class PoseLandmarkerHelper(
     context: Context,
-    private val onResult: (List<PosePoint>) -> Unit,
+    private val onResult: (points: List<PosePoint>, imageWidth: Int, imageHeight: Int) -> Unit,
     private val onError: (String) -> Unit
 ) {
     private var poseLandmarker: PoseLandmarker? = null
+    private var reusableBuffer: Bitmap? = null
 
     init {
         try {
@@ -32,7 +33,9 @@ class PoseLandmarkerHelper(
                 .setMinPoseDetectionConfidence(0.5f)
                 .setMinPosePresenceConfidence(0.5f)
                 .setMinTrackingConfidence(0.5f)
-                .setResultListener { result: PoseLandmarkerResult, _ ->
+                .setResultListener { result: PoseLandmarkerResult, input ->
+                    val imgW = input.width
+                    val imgH = input.height
                     val firstPose = result.landmarks().firstOrNull()
                     if (firstPose != null) {
                         val points = firstPose.map { lm ->
@@ -42,9 +45,9 @@ class PoseLandmarkerHelper(
                                 visibility = lm.visibility().orElse(0.5f)
                             )
                         }
-                        onResult(points)
+                        onResult(points, imgW, imgH)
                     } else {
-                        onResult(emptyList())
+                        onResult(emptyList(), imgW, imgH)
                     }
                 }
                 .setErrorListener { e ->
@@ -67,35 +70,34 @@ class PoseLandmarkerHelper(
 
         try {
             val frameTime = SystemClock.uptimeMillis()
-            val bitmapBuffer = Bitmap.createBitmap(
-                imageProxy.width,
-                imageProxy.height,
-                Bitmap.Config.ARGB_8888
-            )
-            imageProxy.planes[0].buffer.rewind()
-            bitmapBuffer.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
+            val w = imageProxy.width
+            val h = imageProxy.height
 
+            val buffer = reusableBuffer?.takeIf { it.width == w && it.height == h }
+                ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+                    reusableBuffer?.recycle()
+                    reusableBuffer = it
+                }
+
+            imageProxy.planes[0].buffer.rewind()
+            buffer.copyPixelsFromBuffer(imageProxy.planes[0].buffer)
+
+            val rotation = imageProxy.imageInfo.rotationDegrees.toFloat()
             val matrix = Matrix().apply {
-                postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
+                if (rotation != 0f) {
+                    postRotate(rotation)
+                }
                 if (isFrontCamera) {
-                    postScale(-1f, 1f, imageProxy.width / 2f, imageProxy.height / 2f)
+                    // Mirror horizontally AFTER rotation so front camera matches PreviewView
+                    postScale(-1f, 1f)
                 }
             }
 
-            val rotatedBitmap = Bitmap.createBitmap(
-                bitmapBuffer,
-                0,
-                0,
-                bitmapBuffer.width,
-                bitmapBuffer.height,
-                matrix,
-                true
-            )
-
+            val rotatedBitmap = Bitmap.createBitmap(buffer, 0, 0, w, h, matrix, false)
             val mpImage = BitmapImageBuilder(rotatedBitmap).build()
             landmarker.detectAsync(mpImage, frameTime)
         } catch (_: Exception) {
-            // Skip frame if conversion fails
+            // Skip corrupted frame
         } finally {
             imageProxy.close()
         }
@@ -107,5 +109,7 @@ class PoseLandmarkerHelper(
         } catch (_: Exception) {
         }
         poseLandmarker = null
+        reusableBuffer?.recycle()
+        reusableBuffer = null
     }
 }

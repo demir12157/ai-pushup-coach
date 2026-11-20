@@ -5,6 +5,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -44,18 +46,13 @@ import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-private val SKELETON_EDGES = listOf(
-    11 to 13, 13 to 15,
-    12 to 14, 14 to 16,
-    11 to 12,
-    11 to 23, 12 to 24,
-    23 to 24,
-    23 to 25, 25 to 27,
-    24 to 26, 26 to 28
-)
+private val LEFT_EDGES = listOf(7 to 11, 11 to 13, 13 to 15, 11 to 23, 23 to 25, 25 to 27)
+private val RIGHT_EDGES = listOf(8 to 12, 12 to 14, 14 to 16, 12 to 24, 24 to 26, 26 to 28)
+private val BRIDGE_EDGES = listOf(11 to 12, 23 to 24)
 
 @Composable
 fun CameraWorkoutScreen(
@@ -70,6 +67,7 @@ fun CameraWorkoutScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     var isFrontCamera by remember { mutableStateOf(true) }
     var liveState by remember { mutableStateOf(LivePoseState()) }
@@ -80,7 +78,7 @@ fun CameraWorkoutScreen(
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val isPhoneShakingRef = remember { AtomicBoolean(false) }
 
-    // Hardware accelerometer/gyroscope listener — only flags shake if the phone physically moves!
+    // Hardware IMU listener (gyroscope + accelerometer)
     DisposableEffect(context) {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val gyro = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
@@ -133,26 +131,36 @@ fun CameraWorkoutScreen(
     val landmarkerHelper = remember(variation.id) {
         PoseLandmarkerHelper(
             context = context,
-            onResult = { points ->
+            onResult = { points, imgW, imgH ->
                 val shaking = isPhoneShakingRef.getAndSet(false)
-                val out = analyzer.analyze(points, isPhoneShaking = shaking)
-                liveState = out.state
-                if (out.repCompleted != null) {
-                    voiceCoach.announceRep(
-                        out.state.reps,
-                        targetReps,
-                        out.repCompleted.issues.isEmpty()
-                    )
-                } else if (out.voiceCue != null) {
-                    voiceCoach.speak(out.voiceCue)
+                val out = analyzer.analyze(
+                    landmarks = points,
+                    imageWidth = imgW,
+                    imageHeight = imgH,
+                    isPhoneShaking = shaking
+                )
+                mainHandler.post {
+                    liveState = out.state
+                    if (out.repCompleted != null) {
+                        voiceCoach.announceRep(
+                            out.state.reps,
+                            targetReps,
+                            out.repCompleted.issues.isEmpty()
+                        )
+                    } else if (out.voiceCue != null) {
+                        voiceCoach.speak(out.voiceCue)
+                    }
                 }
             },
-            onError = { msg -> errorMsg = msg }
+            onError = { msg ->
+                mainHandler.post { errorMsg = msg }
+            }
         )
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            voiceCoach.stop()
             landmarkerHelper.close()
             cameraExecutor.shutdown()
         }
@@ -172,6 +180,7 @@ fun CameraWorkoutScreen(
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
+                @Suppress("DEPRECATION")
                 val analysis = ImageAnalysis.Builder()
                     .setTargetResolution(Size(480, 640))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -210,33 +219,76 @@ fun CameraWorkoutScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Live Pose Skeleton Overlay
+        // Pixel-accurate FILL_CENTER Pose Skeleton Overlay
         if (showSkeleton && liveState.landmarks.size >= 29) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val lms = liveState.landmarks
-                for ((a, b) in SKELETON_EDGES) {
+                val imgW = liveState.imageWidth.toFloat().coerceAtLeast(1f)
+                val imgH = liveState.imageHeight.toFloat().coerceAtLeast(1f)
+
+                // Match PreviewView.ScaleType.FILL_CENTER geometry exactly
+                val scale = max(size.width / imgW, size.height / imgH)
+                val offsetX = (size.width - imgW * scale) / 2f
+                val offsetY = (size.height - imgH * scale) / 2f
+
+                fun mapPoint(p: PosePoint): Offset = Offset(
+                    x = p.x * imgW * scale + offsetX,
+                    y = p.y * imgH * scale + offsetY
+                )
+
+                val activeEdges = if (liveState.activeSideRight) RIGHT_EDGES else LEFT_EDGES
+                val backEdges = if (liveState.activeSideRight) LEFT_EDGES else RIGHT_EDGES
+
+                // Draw back side & torso bridges subtly
+                for ((a, b) in backEdges + BRIDGE_EDGES) {
                     val pA = lms[a]
                     val pB = lms[b]
-                    if (pA.visibility < 0.3f || pB.visibility < 0.3f) continue
+                    if (pA.visibility < 0.35f || pB.visibility < 0.35f) continue
+                    drawLine(
+                        color = formColor.copy(alpha = 0.35f),
+                        start = mapPoint(pA),
+                        end = mapPoint(pB),
+                        strokeWidth = 6f,
+                        cap = StrokeCap.Round
+                    )
+                }
+
+                // Draw active side with glow halo + crisp core
+                for ((a, b) in activeEdges) {
+                    val pA = lms[a]
+                    val pB = lms[b]
+                    if (pA.visibility < 0.35f || pB.visibility < 0.35f) continue
+                    val start = mapPoint(pA)
+                    val end = mapPoint(pB)
+                    drawLine(
+                        color = formColor.copy(alpha = 0.30f),
+                        start = start,
+                        end = end,
+                        strokeWidth = 20f,
+                        cap = StrokeCap.Round
+                    )
                     drawLine(
                         color = formColor,
-                        start = Offset(pA.x * size.width, pA.y * size.height),
-                        end = Offset(pB.x * size.width, pB.y * size.height),
+                        start = start,
+                        end = end,
                         strokeWidth = 10f,
                         cap = StrokeCap.Round
                     )
                 }
+
+                // Active joints
                 val keyJoints = if (liveState.activeSideRight) {
-                    listOf(12, 14, 16, 24, 26, 28)
+                    listOf(8, 12, 14, 16, 24, 26, 28)
                 } else {
-                    listOf(11, 13, 15, 23, 25, 27)
+                    listOf(7, 11, 13, 15, 23, 25, 27)
                 }
                 for (idx in keyJoints) {
                     val p = lms[idx]
-                    if (p.visibility < 0.3f) continue
-                    val center = Offset(p.x * size.width, p.y * size.height)
-                    drawCircle(color = formColor, radius = 16f, center = center)
-                    drawCircle(color = Color.White, radius = 10f, center = center)
+                    if (p.visibility < 0.35f) continue
+                    val center = mapPoint(p)
+                    drawCircle(color = formColor.copy(alpha = 0.35f), radius = 22f, center = center)
+                    drawCircle(color = formColor, radius = 14f, center = center)
+                    drawCircle(color = Color.White, radius = 8f, center = center)
                 }
             }
         }
@@ -371,7 +423,6 @@ fun CameraWorkoutScreen(
                 .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Live Coaching Feedback Pill
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -396,7 +447,6 @@ fun CameraWorkoutScreen(
                 )
             }
 
-            // Counter + Finish Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,

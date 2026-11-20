@@ -30,8 +30,9 @@ jobs:
           curl -fSL -o app/src/main/assets/pose_landmarker_lite.task \
             https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
 
-      - name: Generate Release Keystore & Build Signed APK
+      - name: Run Unit Tests & Build Signed APK
         run: |
+          gradle test --no-daemon
           keytool -genkey -v -keystore release.keystore -alias sinavkoc -keyalg RSA -keysize 2048 -validity 10000 -storepass sinavkoc123 -keypass sinavkoc123 -dname "CN=SinavKoc,O=SinavKoc,C=TR"
           gradle assembleRelease --no-daemon
 

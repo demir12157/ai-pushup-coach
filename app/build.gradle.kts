@@ -12,8 +12,8 @@ android {
         applicationId = "com.sinavkoc.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.2"
+        versionCode = 5
+        versionName = "1.0.3"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -90,4 +90,6 @@ dependencies {
 
     // JSON persistence
     implementation("com.google.code.gson:gson:2.11.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

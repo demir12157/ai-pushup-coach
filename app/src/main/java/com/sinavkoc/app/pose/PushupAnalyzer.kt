@@ -34,6 +34,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
     private var attemptedDescent = false
     private var lastShallowAlertMs = 0L
 
+    @Synchronized
     fun reset(newVariation: PushupVariation = variation) {
         variation = newVariation
         phase = "IDLE"
@@ -56,17 +57,28 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         lastShallowAlertMs = 0L
     }
 
+    @Synchronized
     fun getReps(): Int = reps
+
+    @Synchronized
     fun getIssueCounts(): Map<FormIssue, Int> = issueCounts.toMap()
+
+    @Synchronized
     fun getAverageScore(): Int =
         if (repRecords.isEmpty()) 100 else (repRecords.sumOf { it.score } / repRecords.size)
 
+    @Synchronized
     fun analyze(
         landmarks: List<PosePoint>,
+        imageWidth: Int = 480,
+        imageHeight: Int = 640,
         isPhoneShaking: Boolean = false,
         nowMs: Long = System.currentTimeMillis()
     ): AnalysisOutput {
-        // 1. Hardware IMU shake detection (real gyroscope/accelerometer — zero false positives when stationary!)
+        val imgW = imageWidth.coerceAtLeast(1)
+        val imgH = imageHeight.coerceAtLeast(1)
+
+        // 1. Hardware IMU shake detection (real gyroscope/accelerometer)
         if (isPhoneShaking) {
             unstableUntilMs = nowMs + 850L
             downHoldFrames = 0
@@ -85,7 +97,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     feedbackText = "Telefon hareket ediyor! Sabit bir yere yasla",
                     currentScore = getAverageScore(),
                     landmarks = landmarks,
-                    activeSideRight = lastUseRight
+                    activeSideRight = lastUseRight,
+                    imageWidth = imgW,
+                    imageHeight = imgH
                 )
             )
         }
@@ -104,7 +118,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     feedbackText = "Yan profilden tüm vücudun görünecek şekilde kadraja gir",
                     currentScore = getAverageScore(),
                     landmarks = landmarks,
-                    activeSideRight = lastUseRight
+                    activeSideRight = lastUseRight,
+                    imageWidth = imgW,
+                    imageHeight = imgH
                 )
             )
         }
@@ -114,7 +130,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         val leftVis = leftIdx.map { landmarks[it].visibility }.average().toFloat()
         val rightVis = rightIdx.map { landmarks[it].visibility }.average().toFloat()
 
-        // Hysteresis so left/right doesn't flip-flop rapidly
+        // Hysteresis so left/right side doesn't flicker
         val useRight = if (lastUseRight) {
             rightVis + 0.08f >= leftVis
         } else {
@@ -136,7 +152,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     feedbackText = "Tüm vücudun net görünmüyor, kameradan biraz uzaklaş",
                     currentScore = getAverageScore(),
                     landmarks = landmarks,
-                    activeSideRight = useRight
+                    activeSideRight = useRight,
+                    imageWidth = imgW,
+                    imageHeight = imgH
                 )
             )
         }
@@ -151,8 +169,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
 
         val lower = if (variation.thresholds.useKneeLine || ankle.visibility < 0.35f) knee else ankle
 
-        val rawElbow = calcAngle(shoulder, elbow, wrist)
-        val rawBody = calcAngle(shoulder, hip, lower)
+        // Aspect-ratio corrected angle calculation (true pixel coordinates!)
+        val rawElbow = calcAnglePx(shoulder, elbow, wrist, imgW, imgH)
+        val rawBody = calcAnglePx(shoulder, hip, lower, imgW, imgH)
 
         val alpha = 0.32f
         val elbowAngle = smoothedElbow?.let { it * (1f - alpha) + rawElbow * alpha } ?: rawElbow
@@ -160,12 +179,14 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         smoothedElbow = elbowAngle
         smoothedBody = bodyAngle
 
-        // 2. Continuous pushup posture check (plank orientation + hands below shoulders)
-        val dx = abs(shoulder.x - hip.x)
-        val dy = abs(shoulder.y - hip.y)
-        val maxVertRatio = if (variation.id == PushupVariationId.INCLINE) 2.2f else 1.45f
-        val handsBelowShoulders = wrist.y > shoulder.y + 0.02f
-        val isPushupPosture = dx > 0.06f && (dy / (dx + 0.001f)) < maxVertRatio && handsBelowShoulders
+        // 2. Continuous pushup posture verification in true pixel geometry
+        val dxPx = abs(shoulder.x - hip.x) * imgW
+        val dyPx = abs(shoulder.y - hip.y) * imgH
+        val maxVertRatio = if (variation.id == PushupVariationId.INCLINE) 2.0f else 1.35f
+        val handsBelowShoulders = (wrist.y - shoulder.y) > 0.02f
+        val isPushupPosture = (dxPx > imgW * 0.06f) &&
+            (dyPx / (dxPx + 0.001f) < maxVertRatio) &&
+            handsBelowShoulders
 
         if (!isPushupPosture) {
             idleResetFrames += 1
@@ -188,7 +209,9 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                     feedbackText = "Şınav (plank) pozisyonuna geç — eller yerde, vücut yatay",
                     currentScore = getAverageScore(),
                     landmarks = landmarks,
-                    activeSideRight = useRight
+                    activeSideRight = useRight,
+                    imageWidth = imgW,
+                    imageHeight = imgH
                 )
             )
         } else {
@@ -212,10 +235,11 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             }
         }
 
-        // Head drop
+        // Head drop (aspect-corrected torso length)
         if (ear.visibility > 0.45f) {
-            val torsoLen = hypot((shoulder.x - hip.x).toDouble(), (shoulder.y - hip.y).toDouble()).toFloat()
-            if (torsoLen > 0.08f && ear.y > shoulder.y + torsoLen * 0.28f) {
+            val torsoLenPx = hypot(((shoulder.x - hip.x) * imgW).toDouble(), ((shoulder.y - hip.y) * imgH).toDouble()).toFloat()
+            val earDropPx = (ear.y - shoulder.y) * imgH
+            if (torsoLenPx > imgW * 0.08f && earDropPx > torsoLenPx * 0.28f) {
                 activeIssues.add(FormIssue.HEAD_DROP)
             }
         }
@@ -231,10 +255,10 @@ class PushupAnalyzer(private var variation: PushupVariation) {
         var completedRep: RepRecord? = null
         var voiceCue: String? = null
 
-        // 3. Debounced state machine (3 consecutive frames + vertical shoulder travel)
+        // 3. Debounced state machine
         when (phase) {
             "IDLE" -> {
-                if (elbowAngle >= t.upAngle - 12f) {
+                if (elbowAngle >= t.upAngle - 16f) {
                     upHoldFrames += 1
                     if (upHoldFrames >= 3) {
                         phase = "UP"
@@ -363,16 +387,24 @@ class PushupAnalyzer(private var variation: PushupVariation) {
                 feedbackText = feedback,
                 currentScore = getAverageScore(),
                 landmarks = landmarks,
-                activeSideRight = useRight
+                activeSideRight = useRight,
+                imageWidth = imgW,
+                imageHeight = imgH
             ),
             repCompleted = completedRep,
             voiceCue = voiceCue
         )
     }
 
-    private fun calcAngle(a: PosePoint, b: PosePoint, c: PosePoint): Float {
-        val rad = atan2((c.y - b.y).toDouble(), (c.x - b.x).toDouble()) -
-            atan2((a.y - b.y).toDouble(), (a.x - b.x).toDouble())
+    private fun calcAnglePx(a: PosePoint, b: PosePoint, c: PosePoint, imgW: Int, imgH: Int): Float {
+        val ax = (a.x * imgW).toDouble()
+        val ay = (a.y * imgH).toDouble()
+        val bx = (b.x * imgW).toDouble()
+        val by = (b.y * imgH).toDouble()
+        val cx = (c.x * imgW).toDouble()
+        val cy = (c.y * imgH).toDouble()
+
+        val rad = atan2(cy - by, cx - bx) - atan2(ay - by, ax - bx)
         var deg = abs(Math.toDegrees(rad)).toFloat()
         if (deg > 180f) deg = 360f - deg
         return deg
