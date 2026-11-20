@@ -35,7 +35,6 @@ strip = true
 
 [package.metadata.android]
 package = "com.sinavkoc.rust"
-version_code = 1
 build_targets = ["aarch64-linux-android"]
 
 [package.metadata.android.sdk]
