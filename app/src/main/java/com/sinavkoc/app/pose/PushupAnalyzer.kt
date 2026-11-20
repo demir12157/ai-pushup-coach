@@ -261,7 +261,7 @@ class PushupAnalyzer(private var variation: PushupVariation) {
             calcAnglePx(shoulder, hip, lower, imgW, imgH)
         }
 
-        val alpha = 0.30f
+        val alpha = 0.38f
         val elbowAngle = smoothedElbow?.let { it * (1f - alpha) + rawElbow * alpha } ?: rawElbow
         val bodyAngle = smoothedBody?.let { it * (1f - alpha) + rawBody * alpha } ?: rawBody
         smoothedElbow = elbowAngle

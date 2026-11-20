@@ -107,13 +107,13 @@ class PushupAnalyzerTest {
             assertTrue(out.state.isFrontView)
             t += 60L
         }
-        repeat(8) {
+        repeat(12) {
             analyzer.analyze(frontPose(1f), 480, 640, false, t)
-            t += 80L
+            t += 70L
         }
-        repeat(8) {
+        repeat(12) {
             analyzer.analyze(frontPose(0f), 480, 640, false, t)
-            t += 80L
+            t += 70L
         }
         assertEquals(1, analyzer.getReps())
     }
